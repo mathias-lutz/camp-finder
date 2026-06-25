@@ -1,0 +1,10 @@
+{
+  "name": "Campground Browser",
+  "description": "A mobile-friendly campground browser and decision helper that imports Google Sheet data, caches it offline, compares sites side-by-side, and utilizes Gemini AI to recommend the next best campsite.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

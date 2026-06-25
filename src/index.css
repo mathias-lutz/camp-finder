@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Lora:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Lora:ital,wght@0,400..600;1,400..600&display=swap');
+
+@theme {
+  --font-serif: "Playfair Display", "Lora", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
+  --color-editorial-bg: #FAF9F6;
+  --color-editorial-card: #F2F0EA;
+  --color-editorial-border: #E0DDD5;
+  --color-editorial-moss: #3E4D40;
+  --color-editorial-moss-dark: #2D3A2F;
+  --color-editorial-text: #2D2D2D;
+  --color-editorial-darkred: #B04B4B;
+  --color-editorial-muted: #8C8980;
+}
+
+body {
+  background-color: #FAF9F6;
+  color: #2D2D2D;
+  font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+}
+
+/* Custom map marker styles to match the editorial theme */
+.custom-camp-pin {
+  transition: transform 0.2s ease-in-out;
+}
+
+.custom-camp-pin:hover {
+  transform: scale(1.15);
+}
