@@ -28,3 +28,18 @@ body {
 .custom-camp-pin:hover {
   transform: scale(1.15);
 }
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  border: 1px solid #E0DDD5;
+  box-shadow: 0 4px 16px rgba(60, 58, 52, 0.12);
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+  line-height: 1.4;
+}
+
+.camp-map-popup a:hover {
+  opacity: 0.75;
+}

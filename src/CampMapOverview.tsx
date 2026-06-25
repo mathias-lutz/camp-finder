@@ -9,6 +9,7 @@ export interface MapCamp {
   state: string;
   latitude: number;
   longitude: number;
+  mapLink?: string;
 }
 
 interface CampMapOverviewProps {
@@ -16,10 +17,42 @@ interface CampMapOverviewProps {
   focusCampId: string | null;
   userCoords: { lat: number; lng: number } | null;
   onClose: () => void;
+  onShowDetails: (campId: string) => void;
 }
 
 const MOSS = '#3E4D40';
 const MOSS_DARK = '#2D3A2F';
+const LINK_STYLE = `color:${MOSS};font-size:12px;font-weight:600;text-decoration:underline;text-underline-offset:2px;`;
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function googleMapsUrl(camp: MapCamp): string {
+  if (camp.mapLink?.trim()) {
+    const link = camp.mapLink.trim();
+    return link.startsWith('http') ? link : `https://${link}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${camp.latitude},${camp.longitude}`;
+}
+
+function buildPopupHtml(camp: MapCamp): string {
+  const stateLabel = camp.state && camp.state !== 'N/A' ? ` · ${escapeHtml(camp.state)}` : '';
+  const mapsUrl = escapeHtml(googleMapsUrl(camp));
+  return `
+    <div class="camp-map-popup">
+      <strong style="font-family:Georgia,serif;font-style:italic;color:${MOSS}">${escapeHtml(camp.name)}</strong>${stateLabel}
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+        <a href="#" data-action="show-details" data-camp-id="${escapeHtml(camp.id)}" style="${LINK_STYLE}">Details anzeigen</a>
+        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" style="${LINK_STYLE}">Google Maps</a>
+      </div>
+    </div>
+  `;
+}
 
 function createCampIcon(active: boolean): L.DivIcon {
   const size = active ? 34 : 28;
@@ -55,10 +88,12 @@ function createUserIcon(): L.DivIcon {
   });
 }
 
-export function CampMapOverview({ camps, focusCampId, userCoords, onClose }: CampMapOverviewProps) {
+export function CampMapOverview({ camps, focusCampId, userCoords, onClose, onShowDetails }: CampMapOverviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const onShowDetailsRef = useRef(onShowDetails);
+  onShowDetailsRef.current = onShowDetails;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -75,7 +110,18 @@ export function CampMapOverview({ camps, focusCampId, userCoords, onClose }: Cam
 
     mapRef.current = map;
 
+    const handlePopupClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('[data-action="show-details"]');
+      if (!target) return;
+      e.preventDefault();
+      const campId = target.getAttribute('data-camp-id');
+      if (campId) onShowDetailsRef.current(campId);
+    };
+
+    map.getContainer().addEventListener('click', handlePopupClick);
+
     return () => {
+      map.getContainer().removeEventListener('click', handlePopupClick);
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();
@@ -100,10 +146,7 @@ export function CampMapOverview({ camps, focusCampId, userCoords, onClose }: Cam
         title: camp.name,
       });
 
-      const stateLabel = camp.state && camp.state !== 'N/A' ? ` · ${camp.state}` : '';
-      marker.bindPopup(
-        `<strong style="font-family:Georgia,serif;font-style:italic;color:${MOSS}">${camp.name}</strong>${stateLabel}`
-      );
+      marker.bindPopup(buildPopupHtml(camp));
 
       marker.on('click', () => {
         markersRef.current.forEach((m, id) => {

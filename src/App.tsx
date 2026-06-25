@@ -1222,6 +1222,17 @@ export default function App() {
     setShowMapOverview(true);
   };
 
+  const showCampDetails = (campId: string) => {
+    setShowMapOverview(false);
+    setMapFocusCampId(null);
+    setExpandedCampIds(prev => new Set(prev).add(campId));
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.getElementById(`camp-card-${campId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+  };
+
   // User Geolocation Coordinates (Defaults to Zurich, Switzerland to calculate immediately)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>(() => ({ lat: 47.3769, lng: 8.5417 }));
 
@@ -1549,6 +1560,7 @@ export default function App() {
           state: c.state,
           latitude: c.latitude as number,
           longitude: c.longitude as number,
+          mapLink: c.mapLink,
         })),
     [campsites]
   );
@@ -1926,6 +1938,7 @@ export default function App() {
             setShowMapOverview(false);
             setMapFocusCampId(null);
           }}
+          onShowDetails={showCampDetails}
         />
       )}
 
