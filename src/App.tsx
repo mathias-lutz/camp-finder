@@ -1649,23 +1649,23 @@ export default function App() {
 
                         return (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-2 sm:gap-4">
                               {/* Map (Karte) Block */}
                               {mapVal ? (
                                 <a
                                   href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
+                                  className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
                                 >
-                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                  <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
                                     <Navigation className="w-4 h-4 shrink-0" />
                                     <span>Google Maps</span>
                                   </span>
                                 </a>
                               ) : (
-                                <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                  <span className="text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
+                                <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
+                                  <span className="text-xs sm:text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
                                 </div>
                               )}
 
@@ -1675,16 +1675,16 @@ export default function App() {
                                   href={urlVal.startsWith('http') ? urlVal : `https://${urlVal}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
+                                  className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
                                 >
-                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                  <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
                                     <Info className="w-4 h-4 shrink-0" />
                                     <span>Pin Camp</span>
                                   </span>
                                 </a>
                               ) : (
-                                <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                  <span className="text-sm text-editorial-muted italic">Keine Website hinterlegt</span>
+                                <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
+                                  <span className="text-xs sm:text-sm text-editorial-muted italic">Keine Website hinterlegt</span>
                                 </div>
                               )}
                             </div>
