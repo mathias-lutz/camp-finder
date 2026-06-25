@@ -492,11 +492,40 @@ async function resolveCoordsAsync(
 interface ScrapeResult {
   imageUrl: string | null;
   images: string[];
+  infoParagraph: string | null;
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+}
+
+function stripHtmlTags(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+
+function extractCampsiteInfoParagraph(html: string): string | null {
+  const sectionMatch =
+    html.match(/<section[^>]*\bid=["']campsite-info["'][^>]*>([\s\S]*?)<\/section>/i) ||
+    html.match(/<div[^>]*\bid=["']campsite-info["'][^>]*>([\s\S]*?)<\/div>/i);
+  if (!sectionMatch) return null;
+
+  const firstParagraph = sectionMatch[1].match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+  if (!firstParagraph?.[1]) return null;
+
+  const text = stripHtmlTags(firstParagraph[1]);
+  return text.length > 0 ? text : null;
 }
 
 async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
   const targetUrl = pageUrl.trim();
   const html = await fetchPageHtml(targetUrl);
+  const infoParagraph = extractCampsiteInfoParagraph(html);
 
   let imageUrl: string | null = null;
   const ogMatches = [
@@ -567,7 +596,7 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
     }
   }
 
-  return { imageUrl: resolvedHeroUrl, images: finalImagesList.slice(0, 12) };
+  return { imageUrl: resolvedHeroUrl, images: finalImagesList.slice(0, 12), infoParagraph };
 }
 
 // Normalized fuzzy column extractor
@@ -767,6 +796,7 @@ interface CampgroundDetailImagesProps {
 
 function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
   const [images, setImages] = useState<string[]>([]);
+  const [infoParagraph, setInfoParagraph] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
@@ -778,14 +808,24 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
     const cacheKey = `campground_gallery_${encodeURIComponent(url)}`;
     const cached = localStorage.getItem(cacheKey);
 
+    let needsFetch = true;
     if (cached) {
       try {
-        setImages(JSON.parse(cached));
-        return;
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setImages(parsed);
+          // Legacy cache — refetch to load #campsite-info text
+        } else {
+          setImages(parsed.images || []);
+          setInfoParagraph(parsed.infoParagraph || null);
+          needsFetch = false;
+        }
       } catch (e) {
         localStorage.removeItem(cacheKey);
       }
     }
+
+    if (!needsFetch) return;
 
     const fetchImages = async () => {
       setIsLoading(true);
@@ -795,8 +835,9 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
         if (active) {
           const list = data.images.length > 0 ? data.images : (data.imageUrl ? [data.imageUrl] : []);
           setImages(list);
-          if (list.length > 0) {
-            localStorage.setItem(cacheKey, JSON.stringify(list));
+          setInfoParagraph(data.infoParagraph);
+          if (list.length > 0 || data.infoParagraph) {
+            localStorage.setItem(cacheKey, JSON.stringify({ images: list, infoParagraph: data.infoParagraph }));
           } else {
             setHasError(true);
           }
@@ -854,6 +895,20 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
 
   return (
     <div className="mt-4 pt-4 border-t border-editorial-border font-sans">
+      {isLoading && !infoParagraph && (
+        <div className="mb-4 space-y-2">
+          <div className="h-3 bg-[#F2F0EA] animate-pulse rounded w-full" />
+          <div className="h-3 bg-[#F2F0EA] animate-pulse rounded w-5/6" />
+          <div className="h-3 bg-[#F2F0EA] animate-pulse rounded w-4/6" />
+        </div>
+      )}
+
+      {infoParagraph && (
+        <p className="text-sm text-[#5C5952] leading-relaxed mb-4">
+          {infoParagraph}
+        </p>
+      )}
+
       <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider mb-2">
         Fotos von Pin Camp
       </span>
