@@ -57,167 +57,9 @@ export interface NormalizedCampsite {
   mapLink?: string;
 }
 
-// Epic curated default campsites matching schema
-const DEMO_CAMPSITES: NormalizedCampsite[] = [
-  {
-    id: 'demo-1',
-    name: 'Whispering Pines Creek',
-    state: 'Oregon (Kaskaden-Region)',
-    price: '$25/Nacht',
-    numericPrice: 25,
-    rating: '4.8',
-    numericRating: 4.8,
-    signal: 'Starkes AT&T-Netz (4 Balken)',
-    numericSignal: 5,
-    hookups: 'Standard-Stromanschlüsse vorhanden',
-    hasHookups: true,
-    water: 'Trinkwasser-Zapfstellen am Platz',
-    hasWater: true,
-    toilet: 'Spültoiletten & warme Duschen',
-    hasToilet: true,
-    shade: 'Hoch (Dichter alter Kiefernwald)',
-    numericShade: 3,
-    pets: 'Angeleinte Hunde herzlich willkommen',
-    petsAllowed: true,
-    comments: 'Wunderschöne schattige Plätze direkt an einem rauschenden Fluss. Bietet individuelle Picknicktische aus Zedernholz und makellose gemauerte Feuerstellen. Sehr gepflegte Sanitäranlagen, allerdings sind die Plätze an Juli-Wochenenden schnell ausgebucht.',
-    latitude: 44.0581,
-    longitude: -121.3153,
-    image: 'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?auto=format&fit=crop&w=600&q=80',
-    raw: {
-      'Laden': 'x',
-      'Brot': 'x',
-      'See': 'x',
-      'Fluss': 'x',
-      'Pool': 'x'
-    }
-  },
-  {
-    id: 'demo-2',
-    name: 'Lone Wolf Ridge',
-    state: 'Colorado (San-Juan-Wildnis)',
-    price: '$0 (Kostenloses BLM-Wildcamping)',
-    numericPrice: 0,
-    rating: '4.9',
-    numericRating: 4.9,
-    signal: 'Kein Empfang (Funkloch)',
-    numericSignal: 0,
-    hookups: 'Keine (Autarkes Stehen erforderlich)',
-    hasHookups: false,
-    water: 'Natürlicher Quellbach (Filter nötig)',
-    hasWater: false,
-    toilet: 'Hinterlasse keine Spuren (Vollständig autark)',
-    hasToilet: false,
-    shade: 'Mittel (Schöne Espenhaine)',
-    numericShade: 2,
-    pets: 'Haustiere dürfen frei laufen',
-    petsAllowed: true,
-    comments: 'Spektakulärer Zeltplatz auf einem Bergkamm auf über 3.000 Metern Höhe. Absolut lautlose, kühle Nächte mit einem atemberaubenden Blick auf die Milchstraße. Die unbefestigte Zufahrtsstraße ist steil und holprig – Allradantrieb oder ein SUV mit hoher Bodenfreiheit wird empfohlen.',
-    latitude: 37.8123,
-    longitude: -107.6635,
-    image: 'https://images.unsplash.com/photo-1523987355523-c7b5b0dd90a7?auto=format&fit=crop&w=600&q=80',
-    raw: {}
-  },
-  {
-    id: 'demo-3',
-    name: 'Ocean Breeze Bluff Camp',
-    state: 'Kalifornien (Big-Sur-Klippen)',
-    price: '$45/Nacht',
-    numericPrice: 45,
-    rating: '4.7',
-    numericRating: 4.7,
-    signal: 'Schwaches Verizon-Netz (1-2 Balken)',
-    numericSignal: 2,
-    hookups: 'Einfacher Stellplatz ohne Strom',
-    hasHookups: false,
-    water: 'Zentrale Schlauchstation zum Auffüllen',
-    hasWater: true,
-    toilet: 'Einfache Plumpsklo-Anlagen vorhanden',
-    hasToilet: true,
-    shade: 'Gering (Offene Klippenlandschaft)',
-    numericShade: 1,
-    pets: 'Hunde nur direkt am Stellplatz erlaubt',
-    petsAllowed: true,
-    comments: 'Wachen Sie mit dem beruhigenden Rauschen der Wellen und dem dichten Meeresnebel auf. Die Stellplätze auf den Klippen bieten einen unschlagbaren Weitblick über den wilden Pazifik und direkten Zugang zu Küstenpfaden. Nach Sonnenuntergang kann es sehr windig und kalt werden.',
-    latitude: 36.2104,
-    longitude: -121.7258,
-    image: 'https://images.unsplash.com/photo-1478131143081-80f7f84ca84d?auto=format&fit=crop&w=600&q=80',
-    raw: {
-      'Meer': 'x',
-      'Imbiss': 'x'
-    }
-  },
-  {
-    id: 'demo-4',
-    name: 'Cactus Oasis RV Haven',
-    state: 'Arizona (Sonora-Wüste)',
-    price: '$35/Nacht',
-    numericPrice: 35,
-    rating: '4.1',
-    numericRating: 4.1,
-    signal: 'Hervorragender 5G-Empfang',
-    numericSignal: 5,
-    hookups: 'Vollwertige Anschlüsse (50A Strom + Abwasser)',
-    hasHookups: true,
-    water: 'Eigener Wasseranschluss direkt am Platz',
-    hasWater: true,
-    toilet: 'Geflieste Duschräume & Waschmaschinen',
-    hasToilet: true,
-    shade: 'Keine (Volle Sonneneinstrahlung)',
-    numericShade: 1,
-    pets: 'Eigener kleiner Hundeauslauf vorhanden',
-    petsAllowed: true,
-    comments: 'Ebene Schotterplätze mit viel Platz für große Wohnmobile. Perfekt geeignet für Reisende, die auf schnelles Internet angewiesen sind, um unterwegs zu arbeiten. Kein Schatten vorhanden, aber die Wintersonne ist herrlich wärmend.',
-    latitude: 32.2217,
-    longitude: -110.9265,
-    image: 'https://images.unsplash.com/photo-1496080174650-637e3f22fa03?auto=format&fit=crop&w=600&q=80',
-    raw: {
-      'Pool': 'x',
-      'Imbiss': 'x',
-      'Laden': 'x'
-    }
-  },
-  {
-    id: 'demo-5',
-    name: 'Maple Ridge State Park',
-    state: 'Vermont (Green Mountains)',
-    price: '$30/Nacht',
-    numericPrice: 30,
-    rating: '4.5',
-    numericRating: 4.5,
-    signal: 'Mittelprächtiges LTE-Netz (3 Balken)',
-    numericSignal: 3,
-    hookups: 'Einfacher Stellplatz mit Picknicktisch',
-    hasHookups: false,
-    water: 'Gemeinschafts-Zapfstellen alle paar Plätze',
-    hasWater: true,
-    toilet: 'Moderne WCs & heiße Duschen vorhanden',
-    hasToilet: true,
-    shade: 'Hoch (Prachtvoller Ahorn-Mischwald)',
-    numericShade: 3,
-    pets: 'Erlaubt, Tollwut-Impfpass erforderlich',
-    petsAllowed: true,
-    comments: 'Ein unglaublich schöner Naturplatz, besonders zur herbstlichen Laubfärbung (Indian Summer). Weitläufig voneinander getrennte Waldstellplätze gruppiert um eigene Feuerringe mit Grillgitter. Sehr hilfsbereite Park-Ranger vor Ort.',
-    latitude: 44.3678,
-    longitude: -72.7561,
-    image: 'https://images.unsplash.com/photo-1510312305653-8ed496efae75?auto=format&fit=crop&w=600&q=80',
-    raw: {
-      'Restaurant': 'x',
-      'Brot': 'x',
-      'See': 'x',
-      'Fluss': 'x'
-    }
-  }
-];
-
-const BACKGROUND_ORGANIC_IMAGES = [
-  'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1523987355523-c7b5b0dd90a7?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1478131143081-80f7f84ca84d?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1510312305653-8ed496efae75?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1496080174650-637e3f22fa03?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1487730116645-74489c95b41b?auto=format&fit=crop&w=600&q=80',
-  'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=600&q=80'
-];
+const CAMP_IMAGE_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="#3A3A3A"/></svg>'
+)}`;
 
 interface AmenityConfig {
   label: string;
@@ -285,22 +127,46 @@ function getAmenitiesOfCampsite(camp: NormalizedCampsite): string[] {
   return active;
 }
 
-// Fallback image generator based on campsite id
-function getCampImage(camp: NormalizedCampsite, scrapedImages: Record<string, string> = {}): string {
+function getCampImageUrl(camp: NormalizedCampsite, scrapedImages: Record<string, string> = {}): string | null {
   const imageUrl = (camp.image && scrapedImages[camp.image]) ? scrapedImages[camp.image] : camp.image;
-  if (imageUrl && !isWebpageUrl(imageUrl)) {
-    const trimmed = imageUrl.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
-    } else if (trimmed.startsWith('www.')) {
-      return `https://${trimmed}`;
+  if (!imageUrl || isWebpageUrl(imageUrl)) return null;
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('www.')) return `https://${trimmed}`;
+  return null;
+}
+
+interface CampThumbnailProps {
+  camp: NormalizedCampsite;
+  scrapedImages: Record<string, string>;
+}
+
+function CampThumbnail({ camp, scrapedImages }: CampThumbnailProps) {
+  const imageUrl = useMemo(() => getCampImageUrl(camp, scrapedImages), [camp, scrapedImages]);
+  const [displaySrc, setDisplaySrc] = useState(CAMP_IMAGE_PLACEHOLDER);
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setDisplaySrc(CAMP_IMAGE_PLACEHOLDER);
+      return;
     }
-  }
-  let hashNum = 0;
-  for (let i = 0; i < camp.name.length; i++) {
-    hashNum += camp.name.charCodeAt(i);
-  }
-  return BACKGROUND_ORGANIC_IMAGES[hashNum % BACKGROUND_ORGANIC_IMAGES.length];
+    setDisplaySrc(CAMP_IMAGE_PLACEHOLDER);
+    const img = new Image();
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => setDisplaySrc(imageUrl);
+    img.onerror = () => setDisplaySrc(CAMP_IMAGE_PLACEHOLDER);
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  return (
+    <img
+      src={displaySrc}
+      alt={camp.name}
+      className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500"
+      referrerPolicy="no-referrer"
+      loading="lazy"
+    />
+  );
 }
 
 // GitHub Pages is static-only — sheet data is fetched directly from Google's CSV export URL.
@@ -1056,7 +922,7 @@ export default function App() {
     const saved = localStorage.getItem('campground_cached_data');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved) as NormalizedCampsite[];
+        const parsed = (JSON.parse(saved) as NormalizedCampsite[]).filter(c => !String(c.id).startsWith('demo-'));
         return parsed.map(c => {
           if (c.latitude === null || c.longitude === null) {
             const fallback = getHardcodedCoords(c.name);
@@ -1071,20 +937,10 @@ export default function App() {
           return c;
         });
       } catch {
-        return DEMO_CAMPSITES;
+        return [];
       }
     }
-    return DEMO_CAMPSITES;
-  });
-
-  const [isDemoMode, setIsDemoMode] = useState(() => {
-    const savedUrl = localStorage.getItem('campground_sheet_url');
-    if (savedUrl) return false;
-    const isDemoSaved = localStorage.getItem('campground_is_demo');
-    if (isDemoSaved === 'false') return false;
-    const hasSyncedUserSheet = localStorage.getItem('campground_has_synced_user_sheet_v1');
-    if (hasSyncedUserSheet === 'true') return false;
-    return true;
+    return [];
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -1301,9 +1157,7 @@ export default function App() {
             setCampsites(normalized);
             localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
             localStorage.setItem('campground_sheet_url', sheetUrl.trim());
-            localStorage.setItem('campground_is_demo', 'false');
             localStorage.setItem('campground_has_synced_user_sheet_v1', 'true');
-            setIsDemoMode(false);
             setSyncSuccess(true);
           }
         } catch (err: any) {
@@ -1341,8 +1195,6 @@ export default function App() {
       setCampsites(normalized);
       localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
       localStorage.setItem('campground_sheet_url', sheetUrl.trim());
-      localStorage.setItem('campground_is_demo', 'false');
-      setIsDemoMode(false);
       setSyncSuccess(true);
       setSelectedCampgroundId(null);
     } catch (err: any) {
@@ -1351,19 +1203,6 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Switch back to pre-loaded demo sheet
-  const handleLoadDemo = () => {
-    setCampsites(DEMO_CAMPSITES);
-    setIsDemoMode(true);
-    setSheetUrl('');
-    localStorage.setItem('campground_cached_data', JSON.stringify(DEMO_CAMPSITES));
-    localStorage.setItem('campground_is_demo', 'true');
-    localStorage.removeItem('campground_sheet_url');
-    setSyncSuccess(false);
-    setErrorMsg(null);
-    setSelectedCampgroundId(null);
   };
 
   // Sort campsites depending on selected sort rules
@@ -1457,20 +1296,6 @@ export default function App() {
               <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Laden</span>
             </button>
-
-            {isDemoMode ? (
-              <span className="hidden sm:flex items-center gap-1 text-[10px] bg-editorial-card text-editorial-moss px-3 py-1.5 rounded-full border border-editorial-border font-bold tracking-wider shrink-0 uppercase">
-                Demo aktiv
-              </span>
-            ) : (
-              <button 
-                type="button" 
-                onClick={handleLoadDemo}
-                className="hidden sm:flex items-center gap-1 text-[10px] bg-editorial-bg hover:bg-editorial-card text-editorial-moss-dark px-3 py-1.5 rounded-full border border-editorial-border font-bold transition-all"
-              >
-                Demo laden
-              </button>
-            )}
           </form>
         </div>
       </header>
@@ -1522,13 +1347,7 @@ export default function App() {
             <div className="bg-editorial-card border border-editorial-border rounded-xl p-12 text-center flex flex-col items-center justify-center font-sans">
               <Compass className="w-10 h-10 text-editorial-muted mb-2 stroke-1 animate-pulse" />
               <h4 className="font-serif italic text-editorial-text text-xl font-bold">Keine Campingplätze vorhanden</h4>
-              <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Ihre Liste ist derzeit leer oder das Tabellenformat konnte nicht korrekt ausgelesen werden.</p>
-              <button 
-                onClick={handleLoadDemo}
-                className="mt-4 text-xs bg-editorial-moss text-white font-bold uppercase tracking-widest py-2 px-5 rounded-full hover:bg-editorial-moss-dark transition-all"
-              >
-                Demo-Plätze laden
-              </button>
+              <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Fügen Sie oben Ihren Google-Sheets-Link ein und klicken Sie auf „Laden“, um Ihre Campingplätze anzuzeigen.</p>
             </div>
           ) : (
             sortedCampsites.map((camp) => {
@@ -1550,14 +1369,8 @@ export default function App() {
                   <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-editorial-border min-h-[144px]">
                     
                     {/* Left Thumbnail Photo */}
-                    <div className="md:w-1/4 h-36 md:h-auto overflow-hidden relative shrink-0 bg-editorial-border">
-                      <img 
-                        src={getCampImage(camp, scrapedImages)} 
-                        alt={camp.name} 
-                        className="w-full h-full object-cover transform hover:scale-105 transition-transform duration-500 animate-fade-in"
-                        referrerPolicy="no-referrer"
-                        loading="lazy"
-                      />
+                    <div className="md:w-1/4 h-36 md:h-auto overflow-hidden relative shrink-0 bg-[#3A3A3A]">
+                      <CampThumbnail camp={camp} scrapedImages={scrapedImages} />
                     </div>
 
                     {/* Middle Content core */}
@@ -1839,8 +1652,8 @@ export default function App() {
               <div className="bg-editorial-bg border border-editorial-border p-3.5 rounded-lg flex items-start gap-2.5 font-sans">
                 <Info className="w-4 h-4 text-editorial-moss shrink-0 mt-0.5" />
                 <div className="text-editorial-text">
-                  <strong className="text-editorial-moss block mb-0.5">Keine eigene Tabelle bereit?</strong>
-                  Kein Problem! Die App ist bereits mit fünf wunderschönen Demo-Campingplätzen vorinstalliert. Nutzen Sie einfach den **Demo aktiv** Modus, um Ausstattungen, automatische Fahrtzeiten und die Interaktionsfunktionen risikofrei auszuprobieren!
+                  <strong className="text-editorial-moss block mb-0.5">Erster Start</strong>
+                  Beim ersten Besuch wird Ihre hinterlegte Google-Tabelle automatisch geladen. Sie können jederzeit einen anderen Sheets-Link oben einfügen und auf „Laden“ klicken.
                 </div>
               </div>
             </div>
