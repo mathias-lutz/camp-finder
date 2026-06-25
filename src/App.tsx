@@ -1628,7 +1628,7 @@ export default function App() {
       <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 ${showMapOverview ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
-        <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 pb-3">
+        <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 -mb-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <button
               type="button"
@@ -1660,7 +1660,7 @@ export default function App() {
             </div>
           </div>
 
-          <span className="block w-full text-center mt-2">Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
+          <span className="block w-full text-center mt-4">Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
         </div>
 
         {/* CAMPSITE LIST CORES */}
