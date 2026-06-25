@@ -1713,7 +1713,7 @@ export default function App() {
                   >
                     
                     {/* Left Thumbnail Photo */}
-                    <div className="md:w-[32%] h-44 md:h-auto overflow-hidden relative shrink-0 bg-[#3A3A3A]">
+                    <div className="md:w-[36%] h-48 md:h-auto overflow-hidden relative shrink-0 bg-[#3A3A3A]">
                       <CampThumbnail camp={camp} scrapedImages={scrapedImages} />
                     </div>
 
