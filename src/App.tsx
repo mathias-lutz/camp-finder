@@ -1233,6 +1233,15 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    if (!showMapOverview) return;
+    const prevBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+    };
+  }, [showMapOverview]);
+
   // User Geolocation Coordinates (Defaults to Zurich, Switzerland to calculate immediately)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>(() => ({ lat: 47.3769, lng: 8.5417 }));
 
@@ -1616,7 +1625,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTAINER (Single Column Layout) */}
-      <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto`}>
+      <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 ${showMapOverview ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
         <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 pb-3">
