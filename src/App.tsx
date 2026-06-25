@@ -1584,17 +1584,17 @@ export default function App() {
               </span>
             ) : null}
           </div>
-
-          <button
-            type="button"
-            onClick={() => setShowSettings(true)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 p-2.5 text-editorial-moss hover:bg-editorial-card border border-editorial-border rounded-full transition-colors"
-            title="Einstellungen"
-            aria-label="Einstellungen öffnen"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="absolute top-4 right-4 sm:top-6 sm:right-10 py-2 pr-2 pl-1.5 text-editorial-moss hover:bg-editorial-card border border-editorial-border rounded-full transition-colors"
+          title="Einstellungen"
+          aria-label="Einstellungen öffnen"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
       </header>
 
       {/* FEEDBACK STRIP */}
@@ -1618,9 +1618,8 @@ export default function App() {
       <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between text-sm text-editorial-muted px-1 pb-3 border-b border-editorial-border/40 gap-3">
-          <div className="flex flex-col gap-2">
-            <span>Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
+        <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 pb-3 border-b border-editorial-border/40">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <button
               type="button"
               onClick={() => openMapOverview()}
@@ -1630,26 +1629,28 @@ export default function App() {
               <Map className="w-4 h-4 shrink-0" />
               <span>Übersicht</span>
             </button>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="font-sans uppercase tracking-[0.1em] text-[11px] font-bold text-editorial-muted shrink-0">Sortieren:</span>
+              <select 
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortBy)}
+                className="flex-1 sm:flex-none text-sm py-2 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer min-w-0"
+              >
+                <option value="near-to-far">Nah zu fern</option>
+                <option value="far-to-near">Fern zu nah</option>
+                <option value="south-to-north">︽ Süden nach Norden</option>
+                <option value="north-to-south">︾ Norden nach Süden</option>
+                <option value="east-to-west">« Osten nach Westen</option>
+                <option value="west-to-east">» Westen nach Osten</option>
+                <option value="favorites-only">♥ Nur Favoriten</option>
+                <option value="default">Original-Reihenfolge (Tabelle)</option>
+                <option value="alphabet">Alphabetisch (A bis Z)</option>
+              </select>
+            </div>
           </div>
-          
-          <div className="flex items-center gap-2">
-            <span className="font-sans uppercase tracking-[0.1em] text-[11px] font-bold text-editorial-muted">Sortieren:</span>
-            <select 
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortBy)}
-              className="text-sm py-2 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer"
-            >
-              <option value="near-to-far">Nah zu fern</option>
-              <option value="far-to-near">Fern zu nah</option>
-              <option value="south-to-north">︽ Süden nach Norden</option>
-              <option value="north-to-south">︾ Norden nach Süden</option>
-              <option value="east-to-west">« Osten nach Westen</option>
-              <option value="west-to-east">» Westen nach Osten</option>
-              <option value="favorites-only">♥ Nur Favoriten</option>
-              <option value="default">Original-Reihenfolge (Tabelle)</option>
-              <option value="alphabet">Alphabetisch (A bis Z)</option>
-            </select>
-          </div>
+
+          <span className="block w-full text-center">Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
         </div>
 
         {/* CAMPSITE LIST CORES */}
@@ -1712,7 +1713,7 @@ export default function App() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap font-serif">
-                              <h3 className="font-serif italic text-editorial-moss text-lg sm:text-xl font-bold leading-tight font-serif">{camp.name}</h3>
+                              <h3 className="font-serif italic text-editorial-moss text-xl sm:text-2xl font-bold leading-tight font-serif">{camp.name}</h3>
                               {camp.state && camp.state !== 'N/A' && (
                                 <span className="inline-block text-[10px] text-editorial-muted font-bold tracking-tight bg-[#FAF9F6] px-2.5 py-0.5 rounded-full border border-editorial-border font-sans">
                                   {camp.state}
@@ -1840,31 +1841,18 @@ export default function App() {
                           <>
                             <div className="grid grid-cols-2 gap-2 sm:gap-4">
                               {/* Map (Karte) Block */}
-                              {mapVal || (camp.latitude !== null && camp.longitude !== null) ? (
-                                camp.latitude !== null && camp.longitude !== null ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => openMapOverview(camp.id)}
-                                    className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0 text-left w-full"
-                                  >
-                                    <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
-                                      <Map className="w-4 h-4 shrink-0" />
-                                      <span>Karte</span>
-                                    </span>
-                                  </button>
-                                ) : (
-                                  <a
-                                    href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
-                                  >
-                                    <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
-                                      <Navigation className="w-4 h-4 shrink-0" />
-                                      <span>Google Maps</span>
-                                    </span>
-                                  </a>
-                                )
+                              {mapVal ? (
+                                <a
+                                  href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
+                                >
+                                  <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                    <Navigation className="w-4 h-4 shrink-0" />
+                                    <span>Google Maps</span>
+                                  </span>
+                                </a>
                               ) : (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
