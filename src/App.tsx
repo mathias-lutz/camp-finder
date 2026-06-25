@@ -60,6 +60,31 @@ export interface NormalizedCampsite {
 
 const CONTENT_MAX_W = 'max-w-[45rem]'; // ~20% narrower than max-w-4xl (896px → 720px)
 
+type SortBy =
+  | 'default'
+  | 'rating'
+  | 'price'
+  | 'alphabet'
+  | 'near-to-far'
+  | 'far-to-near'
+  | 'south-to-north'
+  | 'north-to-south'
+  | 'east-to-west'
+  | 'west-to-east';
+
+const SORT_BY_OPTIONS: SortBy[] = [
+  'default', 'rating', 'price', 'near-to-far', 'far-to-near',
+  'south-to-north', 'north-to-south', 'east-to-west', 'west-to-east', 'alphabet',
+];
+
+function loadSavedSortBy(): SortBy {
+  try {
+    const saved = localStorage.getItem('campground_sort_by');
+    if (saved && SORT_BY_OPTIONS.includes(saved as SortBy)) return saved as SortBy;
+  } catch { /* ignore */ }
+  return 'default';
+}
+
 const CAMP_IMAGE_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="#3A3A3A"/></svg>'
 )}`;
@@ -1071,7 +1096,11 @@ export default function App() {
   const [syncSuccess, setSyncSuccess] = useState(false);
 
   // Sorting Option
-  const [sortBy, setSortBy] = useState<'default' | 'rating' | 'price' | 'alphabet' | 'near-to-far' | 'far-to-near' | 'south-to-north' | 'north-to-south' | 'east-to-west' | 'west-to-east'>('default');
+  const [sortBy, setSortBy] = useState<SortBy>(loadSavedSortBy);
+
+  useEffect(() => {
+    localStorage.setItem('campground_sort_by', sortBy);
+  }, [sortBy]);
 
   // Selected campground highlight trigger
   const [expandedCampIds, setExpandedCampIds] = useState<Set<string>>(() => new Set());
@@ -1448,7 +1477,7 @@ export default function App() {
             <span className="font-sans uppercase tracking-[0.1em] text-[9px] font-bold text-editorial-muted">Sortieren:</span>
             <select 
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as SortBy)}
               className="text-xs py-1.5 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer"
             >
               <option value="default">Original-Reihenfolge (Tabelle)</option>
