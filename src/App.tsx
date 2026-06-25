@@ -1465,13 +1465,19 @@ export default function App() {
                               )}
                             </div>
 
-                            {/* Driving Time Element right underneath the title */}
+                            {camp.comments && camp.comments.trim() ? (
+                              <p className="text-sm text-[#5C5952] line-clamp-3 mt-2 leading-relaxed font-sans">
+                                {camp.comments}
+                              </p>
+                            ) : null}
+
+                            {/* Driving time & distance below Bemerkung */}
                             {(() => {
                               const timeInfo = drivingTimes[camp.id];
                               if (!timeInfo) {
                                 if (camp.latitude !== null && camp.longitude !== null) {
                                   return (
-                                    <div className="flex items-center gap-1.5 text-[10px] text-[#8C8880] font-mono mt-1 font-semibold">
+                                    <div className="flex items-center gap-1.5 text-[10px] text-[#8C8880] font-mono mt-2 font-semibold">
                                       <Car className="w-3 h-3 shrink-0" />
                                       <span>Fahrzeit wird berechnet...</span>
                                     </div>
@@ -1481,7 +1487,7 @@ export default function App() {
                               }
 
                               return (
-                                <div className="flex items-center gap-1.5 text-[10px] text-editorial-moss font-mono mt-1 font-bold flex-wrap">
+                                <div className="flex items-center gap-1.5 text-[10px] text-editorial-moss font-mono mt-2 font-bold flex-wrap">
                                   <div className="flex items-center gap-1 bg-[#F3F5F3] border border-editorial-border/60 text-editorial-moss px-2 py-0.5 rounded-md">
                                     <Car className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
                                     <span>{timeInfo.duration} Fahrzeit</span>
@@ -1494,12 +1500,6 @@ export default function App() {
                                 </div>
                               );
                             })()}
-                            
-                            {camp.comments && camp.comments.trim() ? (
-                              <p className="text-sm text-[#5C5952] line-clamp-3 mt-2 leading-relaxed font-sans">
-                                {camp.comments}
-                              </p>
-                            ) : null}
                           </div>
                         </div>
                       </div>
