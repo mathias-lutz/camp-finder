@@ -305,23 +305,27 @@ function extractCoordsFromUrl(url: string | null): { lat: number, lng: number } 
   return null;
 }
 
-function estimateRouteLocal(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Earth radius in km
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
+  const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const straightDistance = R * c; // in km
+  return R * c;
+}
 
-  // Driving distance is roughly 1.35 times straight line due to road network winding
-  const drivingDistance = straightDistance * 1.35;
-  
-  // Assume average driving speed of 80 km/h
-  const drivingTimeHrs = drivingDistance / 80;
-  const drivingTimeMins = Math.round(drivingTimeHrs * 60);
+function estimateRouteLocal(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const straightKm = haversineKm(lat1, lon1, lat2, lon2);
+
+  // Longer trips use more highways → lower road factor & higher average speed
+  const roadFactor = 1.12 + Math.min(0.28, 52 / Math.max(straightKm, 1));
+  const drivingDistance = straightKm * roadFactor;
+  const avgSpeedKmh = Math.min(102, 62 + straightKm * 0.045);
+
+  const drivingTimeMins = Math.round((drivingDistance / avgSpeedKmh) * 60);
 
   let durationStr = '';
   if (drivingTimeMins < 60) {
@@ -423,30 +427,96 @@ function formatDurationSeconds(seconds: number): string {
   return rem > 0 ? `${hrs} Std. ${rem} Min.` : `${hrs} Std.`;
 }
 
+// OSRM/Valhalla tend to run slightly slower than Google Maps car estimates (no live traffic).
+const ROUTED_DURATION_CALIBRATION = 0.93;
+
+function buildRoutedResult(
+  durationSeconds: number,
+  distanceMeters: number,
+  isEstimated: boolean
+): { duration: string; distance: string; isEstimated: boolean; durationMinutes: number } {
+  const calibratedSeconds = durationSeconds * ROUTED_DURATION_CALIBRATION;
+  return {
+    duration: formatDurationSeconds(calibratedSeconds),
+    durationMinutes: Math.round(calibratedSeconds / 60),
+    distance: `${(distanceMeters / 1000).toFixed(0)} km`,
+    isEstimated,
+  };
+}
+
+async function tryOsrmRoute(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number
+): Promise<{ duration: number; distance: number } | null> {
+  const coords = `${originLng},${originLat};${destLng},${destLat}`;
+  const endpoints = [
+    `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`,
+    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coords}?overview=false`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes?.[0]) {
+        return { duration: data.routes[0].duration, distance: data.routes[0].distance };
+      }
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return null;
+}
+
+async function tryValhallaRoute(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number
+): Promise<{ duration: number; distance: number } | null> {
+  try {
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [
+          { lat: originLat, lon: originLng },
+          { lat: destLat, lon: destLng },
+        ],
+        costing: 'auto',
+        units: 'kilometers',
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const summary = data.trip?.summary;
+    if (!summary?.time || !summary?.length) return null;
+    return { duration: summary.time, distance: summary.length * 1000 };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchDrivingTime(
   originLat: number,
   originLng: number,
   destLat: number,
   destLng: number
 ): Promise<{ duration: string; distance: string; isEstimated: boolean; durationMinutes: number }> {
-  try {
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=false`;
-    const res = await fetch(osrmUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.code === 'Ok' && data.routes?.[0]) {
-        const route = data.routes[0];
-        return {
-          duration: formatDurationSeconds(route.duration),
-          durationMinutes: Math.round(route.duration / 60),
-          distance: `${(route.distance / 1000).toFixed(0)} km`,
-          isEstimated: false,
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('OSRM routing unavailable, using straight-line estimate:', err);
+  const osrm = await tryOsrmRoute(originLat, originLng, destLat, destLng);
+  if (osrm) {
+    return buildRoutedResult(osrm.duration, osrm.distance, false);
   }
+
+  const valhalla = await tryValhallaRoute(originLat, originLng, destLat, destLng);
+  if (valhalla) {
+    return buildRoutedResult(valhalla.duration, valhalla.distance, false);
+  }
+
+  console.warn('Routing APIs unavailable, using improved straight-line estimate');
   const est = estimateRouteLocal(originLat, originLng, destLat, destLng);
   return { duration: est.duration, distance: est.distance, isEstimated: true, durationMinutes: est.durationMinutes };
 }
@@ -1121,7 +1191,7 @@ export default function App() {
   // drivingTimes cache map (stored in localStorage)
   const [drivingTimes, setDrivingTimes] = useState<Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string; durationMinutes?: number }>>(() => {
     try {
-      const saved = localStorage.getItem('campground_driving_times_v1');
+      const saved = localStorage.getItem('campground_driving_times_v2');
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
@@ -1159,7 +1229,7 @@ export default function App() {
     const fetchTimes = async () => {
       let cachedTimes: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string; durationMinutes?: number }> = {};
       try {
-        cachedTimes = JSON.parse(localStorage.getItem('campground_driving_times_v1') || '{}');
+        cachedTimes = JSON.parse(localStorage.getItem('campground_driving_times_v2') || '{}');
       } catch { /* ignore */ }
 
       const updates: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey: string; durationMinutes: number }> = {};
@@ -1185,7 +1255,7 @@ export default function App() {
       if (Object.keys(updates).length > 0 && active) {
         setDrivingTimes((prev) => {
           const nextTimes = { ...prev, ...updates };
-          localStorage.setItem('campground_driving_times_v1', JSON.stringify(nextTimes));
+          localStorage.setItem('campground_driving_times_v2', JSON.stringify(nextTimes));
           return nextTimes;
         });
       }
