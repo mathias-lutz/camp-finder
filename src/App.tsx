@@ -1357,7 +1357,7 @@ export default function App() {
           <div className="flex flex-col items-center text-center">
             <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
             {sheetSlug ? (
-              <span className="text-xs uppercase tracking-[0.2em] font-bold text-editorial-muted mt-1.5">
+              <span className="text-sm sm:text-base uppercase tracking-[0.2em] font-bold text-editorial-muted mt-2">
                 {sheetSlug}
               </span>
             ) : null}
@@ -1452,7 +1452,7 @@ export default function App() {
                     </div>
 
                     {/* Middle Content core */}
-                    <div className={`flex-1 p-5 flex flex-col justify-between transition-colors duration-300 bg-editorial-card group-hover:bg-white ${isExpanded ? 'bg-white' : ''}`}>
+                    <div className="flex-1 p-5 flex flex-col justify-between bg-editorial-card">
                       <div>
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1486,16 +1486,18 @@ export default function App() {
                                     <Car className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
                                     <span>{timeInfo.duration} Fahrzeit</span>
                                   </div>
-                                  <span className="text-editorial-muted/80 text-[9px] font-sans font-medium">
-                                    ({timeInfo.distance}{timeInfo.isEstimated ? ' Luftlinie-Schätzung' : ' via Google Maps'})
+                                  <span className="text-editorial-muted/80 text-xs font-sans font-medium">
+                                    {timeInfo.isEstimated
+                                      ? `~${timeInfo.distance} Luftlinie`
+                                      : `${timeInfo.distance} Fahrstrecke`}
                                   </span>
                                 </div>
                               );
                             })()}
                             
                             {camp.comments && camp.comments.trim() ? (
-                              <p className="text-xs text-[#5C5952] line-clamp-3 mt-1.5 leading-relaxed font-sans font-medium italic">
-                                "{camp.comments}"
+                              <p className="text-sm text-[#5C5952] line-clamp-3 mt-2 leading-relaxed font-sans">
+                                {camp.comments}
                               </p>
                             ) : null}
                           </div>
@@ -1572,16 +1574,14 @@ export default function App() {
                                   rel="noopener noreferrer"
                                   className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
                                 >
-                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
-                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5 mt-2">
+                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
                                     <Navigation className="w-4 h-4 shrink-0" />
                                     <span>Google Maps</span>
                                   </span>
                                 </a>
                               ) : (
                                 <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
-                                  <span className="text-sm text-editorial-muted italic block mt-2">Keine Karte hinterlegt</span>
+                                  <span className="text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
                                 </div>
                               )}
 
@@ -1593,16 +1593,14 @@ export default function App() {
                                   rel="noopener noreferrer"
                                   className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
                                 >
-                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
-                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5 mt-2">
+                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
                                     <Info className="w-4 h-4 shrink-0" />
                                     <span>Pin Camp</span>
                                   </span>
                                 </a>
                               ) : (
                                 <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
-                                  <span className="text-sm text-editorial-muted italic block mt-2">Keine Website hinterlegt</span>
+                                  <span className="text-sm text-editorial-muted italic">Keine Website hinterlegt</span>
                                 </div>
                               )}
                             </div>
@@ -1614,7 +1612,7 @@ export default function App() {
                   )}
 
                   {/* Card footer — Details toggle */}
-                  <div className={`border-t border-editorial-border px-5 py-3 flex justify-end transition-colors duration-300 bg-[#FAF9F6] group-hover:bg-white ${isExpanded ? 'bg-white' : ''}`}>
+                  <div className="border-t border-editorial-border px-5 py-3 flex justify-end bg-[#FAF9F6]">
                     <button
                       type="button"
                       onClick={(e) => {
