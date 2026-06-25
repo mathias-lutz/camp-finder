@@ -303,6 +303,38 @@ function getCampImage(camp: NormalizedCampsite, scrapedImages: Record<string, st
   return BACKGROUND_ORGANIC_IMAGES[hashNum % BACKGROUND_ORGANIC_IMAGES.length];
 }
 
+// GitHub Pages is static-only — sheet data is fetched directly from Google's CSV export URL.
+function buildSheetExportUrl(sheetUrl: string): string {
+  const sheetIdMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (!sheetIdMatch) {
+    throw new Error('Could not extract Google Spreadsheet ID from the URL. Please verify the URL format.');
+  }
+  const sheetId = sheetIdMatch[1];
+  const gidMatch = sheetUrl.match(/[#&]gid=([0-9]+)/);
+  const gid = gidMatch ? gidMatch[1] : '0';
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+}
+
+async function fetchSheetCsv(sheetUrl: string): Promise<string> {
+  const exportUrl = buildSheetExportUrl(sheetUrl);
+  const response = await fetch(exportUrl);
+  if (!response.ok) {
+    throw new Error(
+      `Google Sheets export returned status ${response.status}. Ensure the sheet is shared as "Anyone with the link can view".`
+    );
+  }
+  return response.text();
+}
+
+// Client-side coordinate resolution (replaces /api/resolve-coords on static hosts).
+function resolveCoordsClient(mapLink: string, name: string): { lat: number; lng: number } | null {
+  if (mapLink) {
+    const coords = extractCoordsFromUrl(mapLink);
+    if (coords) return coords;
+  }
+  return getHardcodedCoords(name);
+}
+
 // Quoted CSV parser
 function parseCSV(text: string): Record<string, string>[] {
   const lines: string[] = [];
@@ -644,22 +676,9 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
     const fetchImages = async () => {
       setIsLoading(true);
       setHasError(false);
-      try {
-        const response = await fetch(`/api/scrape-image?url=${encodeURIComponent(url)}`);
-        if (!response.ok) throw new Error('Failed to fetch images');
-        const data = await response.json();
-        
-        if (active) {
-          const list = data.images || [];
-          setImages(list);
-          localStorage.setItem(cacheKey, JSON.stringify(list));
-        }
-      } catch (err) {
-        console.error('Error fetching detail images:', err);
-        if (active) setHasError(true);
-      } finally {
-        if (active) setIsLoading(false);
-      }
+      // /api/scrape-image requires a backend proxy — unavailable on GitHub Pages.
+      // Gallery images fall back to the campsite's direct image URL or generated placeholders.
+      if (active) setIsLoading(false);
     };
 
     fetchImages();
@@ -932,51 +951,15 @@ export default function App() {
           continue; // Already computed for these coordinates
         }
 
-        try {
-          console.log(`Fetching route: ${userCoords.lat},${userCoords.lng} to ${lat},${lng}`);
-          const res = await fetch(`/api/driving-time?originLat=${userCoords.lat}&originLng=${userCoords.lng}&destLat=${lat}&destLng=${lng}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.hasKey && data.status === 'OK' && data.durationText) {
-              nextTimes[camp.id] = {
-                duration: data.durationText,
-                distance: data.distanceText,
-                isEstimated: false,
-                cacheKey
-              };
-              updated = true;
-            } else {
-              // Standard local haversine logic fallback
-              const est = estimateRouteLocal(userCoords.lat, userCoords.lng, lat, lng);
-              nextTimes[camp.id] = {
-                duration: est.duration,
-                distance: est.distance,
-                isEstimated: true,
-                cacheKey
-              };
-              updated = true;
-            }
-          } else {
-            const est = estimateRouteLocal(userCoords.lat, userCoords.lng, lat, lng);
-            nextTimes[camp.id] = {
-              duration: est.duration,
-              distance: est.distance,
-              isEstimated: true,
-              cacheKey
-            };
-            updated = true;
-          }
-        } catch (err) {
-          console.error(`Route request error for ${camp.name}, falling back:`, err);
-          const est = estimateRouteLocal(userCoords.lat, userCoords.lng, lat, lng);
-          nextTimes[camp.id] = {
-            duration: est.duration,
-            distance: est.distance,
-            isEstimated: true,
-            cacheKey
-          };
-          updated = true;
-        }
+        // /api/driving-time requires a backend — use local haversine estimate on static hosts.
+        const est = estimateRouteLocal(userCoords.lat, userCoords.lng, lat, lng);
+        nextTimes[camp.id] = {
+          duration: est.duration,
+          distance: est.distance,
+          isEstimated: true,
+          cacheKey
+        };
+        updated = true;
 
         // Throttle to respect servers
         await new Promise((r) => setTimeout(r, 100));
@@ -1015,28 +998,22 @@ export default function App() {
         if (!active) break;
         attemptedResolves.current.add(camp.id);
 
-        try {
-          console.log(`[Background Coordinate Resolve] Resolving ${camp.name}...`);
-          const res = await fetch(`/api/resolve-coords?mapLink=${encodeURIComponent(camp.mapLink || '')}&name=${encodeURIComponent(camp.name)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.lat !== null && data.lng !== null) {
-              const index = nextCampsites.findIndex(c => c.id === camp.id);
-              if (index !== -1 && active) {
-                nextCampsites[index] = {
-                  ...nextCampsites[index],
-                  latitude: data.lat,
-                  longitude: data.lng
-                };
-                isUpdated = true;
-                console.log(`[Background Coordinate Resolve] Successfully updated ${camp.name}:`, data.lat, data.lng);
-              }
-            } else {
-              console.warn(`[Background Coordinate Resolve] Failed to resolve details for ${camp.name}:`, data.message);
-            }
+        // /api/resolve-coords requires a backend — resolve from map URL or built-in registry instead.
+        console.log(`[Background Coordinate Resolve] Resolving ${camp.name}...`);
+        const coords = resolveCoordsClient(camp.mapLink || '', camp.name);
+        if (coords) {
+          const index = nextCampsites.findIndex(c => c.id === camp.id);
+          if (index !== -1 && active) {
+            nextCampsites[index] = {
+              ...nextCampsites[index],
+              latitude: coords.lat,
+              longitude: coords.lng
+            };
+            isUpdated = true;
+            console.log(`[Background Coordinate Resolve] Successfully updated ${camp.name}:`, coords.lat, coords.lng);
           }
-        } catch (err) {
-          console.error(`[Background Coordinate Resolve] Request error for ${camp.name}:`, err);
+        } else {
+          console.warn(`[Background Coordinate Resolve] Could not resolve coordinates for ${camp.name}`);
         }
 
         // Small throttle
@@ -1079,22 +1056,8 @@ export default function App() {
       // Scrape sequentially to respect host servers and API request bounds
       for (const url of urlsToScrape) {
         if (!active) break;
-        try {
-          console.log(`Crawl triggered for webpage image: ${url}`);
-          const res = await fetch(`/api/scrape-image?url=${encodeURIComponent(url)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.imageUrl && active) {
-              setScrapedImages(prev => {
-                const updated = { ...prev, [url]: data.imageUrl };
-                localStorage.setItem('campground_scraped_images', JSON.stringify(updated));
-                return updated;
-              });
-            }
-          }
-        } catch (err) {
-          console.error(`Failed crawling webpage image for ${url}:`, err);
-        }
+        // /api/scrape-image requires a backend proxy — skip on static hosts.
+        console.log(`Skipping webpage image crawl (no backend): ${url}`);
       }
     };
 
@@ -1113,12 +1076,7 @@ export default function App() {
         setIsLoading(true);
         setErrorMsg(null);
         try {
-          const response = await fetch(`/api/sheet?url=${encodeURIComponent(sheetUrl.trim())}`);
-          if (!response.ok) {
-            const errJson = await response.json().catch(() => ({}));
-            throw new Error(errJson.error || `HTTP error ${response.status}`);
-          }
-          const csvText = await response.text();
+          const csvText = await fetchSheetCsv(sheetUrl);
           const parsedRows = parseCSV(csvText);
           if (parsedRows.length > 0) {
             const normalized = parsedRows.map((row, index) => normalizeRow(row, `sheet-${index}`));
@@ -1154,13 +1112,7 @@ export default function App() {
     setSyncSuccess(false);
 
     try {
-      const response = await fetch(`/api/sheet?url=${encodeURIComponent(sheetUrl.trim())}`);
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${response.status}`);
-      }
-
-      const csvText = await response.text();
+      const csvText = await fetchSheetCsv(sheetUrl);
       const parsedRows = parseCSV(csvText);
 
       if (parsedRows.length === 0) {
