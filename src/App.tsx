@@ -1619,13 +1619,13 @@ export default function App() {
       <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
-        <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 pb-3 border-b border-editorial-border/40">
+        <div className="flex flex-col gap-2 text-sm text-editorial-muted px-1 pb-3">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <button
               type="button"
               onClick={() => openMapOverview()}
               disabled={mapCamps.length === 0}
-              className="inline-flex items-center gap-1.5 self-start text-sm text-editorial-moss font-bold border border-editorial-border bg-editorial-card hover:bg-[#EAE8E0] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-xl transition-colors"
+              className="inline-flex items-center gap-1.5 self-end sm:self-auto text-sm text-editorial-moss font-bold border border-editorial-border bg-editorial-card hover:bg-[#EAE8E0] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-xl transition-colors"
             >
               <Map className="w-4 h-4 shrink-0" />
               <span>Übersicht</span>
@@ -1651,7 +1651,7 @@ export default function App() {
             </div>
           </div>
 
-          <span className="block w-full text-center">Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
+          <span className="block w-full text-center mt-2">Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
         </div>
 
         {/* CAMPSITE LIST CORES */}
