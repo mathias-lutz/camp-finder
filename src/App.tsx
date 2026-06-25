@@ -55,7 +55,10 @@ export interface NormalizedCampsite {
   image: string;
   raw: Record<string, string>;
   mapLink?: string;
+  slug?: string;
 }
+
+const CONTENT_MAX_W = 'max-w-[45rem]'; // ~20% narrower than max-w-4xl (896px → 720px)
 
 const CAMP_IMAGE_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="#3A3A3A"/></svg>'
@@ -624,6 +627,9 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
     image = findValue(['url', 'link']);
   }
 
+  const slugKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === 'slug');
+  const slug = slugKey ? row[slugKey].trim() : '';
+
   return {
     id,
     name,
@@ -650,7 +656,12 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
     image,
     raw: row,
     mapLink,
+    slug: slug || undefined,
   };
+}
+
+function extractSheetSlug(camps: NormalizedCampsite[]): string {
+  return camps.find(c => c.slug?.trim())?.slug?.trim() || '';
 }
 
 // Helper to determine if a string is a webpage URL rather than a direct image file
@@ -797,7 +808,7 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
 
   return (
     <div className="mt-4 pt-4 border-t border-editorial-border font-sans">
-      <span className="text-[10px] font-bold text-editorial-muted uppercase block tracking-wider mb-2">
+      <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider mb-2">
         Fotos von Pin Camp
       </span>
       
@@ -951,7 +962,16 @@ export default function App() {
   const [sortBy, setSortBy] = useState<'default' | 'rating' | 'price' | 'alphabet' | 'south-to-north' | 'north-to-south' | 'east-to-west' | 'west-to-east'>('default');
 
   // Selected campground highlight trigger
-  const [selectedCampgroundId, setSelectedCampgroundId] = useState<string | null>(null);
+  const [expandedCampIds, setExpandedCampIds] = useState<Set<string>>(() => new Set());
+
+  const toggleCampExpanded = (id: string) => {
+    setExpandedCampIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [showConfigModal, setShowConfigModal] = useState(false);
 
   // User Geolocation Coordinates (Defaults to Zurich, Switzerland to calculate immediately)
@@ -1158,6 +1178,9 @@ export default function App() {
             localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
             localStorage.setItem('campground_sheet_url', sheetUrl.trim());
             localStorage.setItem('campground_has_synced_user_sheet_v1', 'true');
+            const slug = extractSheetSlug(normalized);
+            if (slug) localStorage.setItem('campground_sheet_slug', slug);
+            else localStorage.removeItem('campground_sheet_slug');
             setSyncSuccess(true);
           }
         } catch (err: any) {
@@ -1195,8 +1218,11 @@ export default function App() {
       setCampsites(normalized);
       localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
       localStorage.setItem('campground_sheet_url', sheetUrl.trim());
+      const slug = extractSheetSlug(normalized);
+      if (slug) localStorage.setItem('campground_sheet_slug', slug);
+      else localStorage.removeItem('campground_sheet_slug');
+      setExpandedCampIds(new Set());
       setSyncSuccess(true);
-      setSelectedCampgroundId(null);
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || 'An unexpected error occurred parsing the sheet.');
@@ -1247,56 +1273,39 @@ export default function App() {
     }
   }, [campsites, sortBy]);
 
+  const sheetSlug = useMemo(() => {
+    const fromCamps = extractSheetSlug(campsites);
+    if (fromCamps) return fromCamps;
+    try {
+      return localStorage.getItem('campground_sheet_slug') || '';
+    } catch {
+      return '';
+    }
+  }, [campsites]);
+
   return (
     <div id="campsite-app" className="min-h-screen bg-editorial-bg text-editorial-text font-sans flex flex-col antialiased selection:bg-editorial-moss selection:text-white">
       
       {/* HEADER SECTION */}
       <header className="border-b border-editorial-border py-6 px-4 sm:px-10 shrink-0 relative z-10 bg-editorial-bg text-editorial-text">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6">
-          
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-editorial-muted">Mads kuratierte Liste</span>
-              <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
-            </div>
-            
-            {/* Quick configuration toggle button */}
-            <button 
-              id="help-btn"
-              onClick={() => setShowConfigModal(true)} 
-              className="p-2 text-editorial-moss hover:bg-editorial-card rounded-full sm:hidden flex items-center ml-2"
-              title="Anleitung anzeigen"
-            >
-              <HelpCircle className="w-5 h-5" />
-            </button>
+        <div className={`${CONTENT_MAX_W} mx-auto relative`}>
+          <div className="flex flex-col items-center text-center">
+            {sheetSlug && (
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-editorial-muted">
+                {sheetSlug}
+              </span>
+            )}
+            <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
           </div>
 
-          {/* SPREADSHEET URL INTEGRATION BOX */}
-          <form onSubmit={handleSheetSync} className="flex-1 max-w-xl w-full flex items-center gap-2">
-            <div className="relative flex-1">
-              <FileSpreadsheet className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-editorial-muted" />
-              <input 
-                type="url"
-                placeholder="Öffentlich freigegebenen Google-Sheets-Link einfügen..."
-                value={sheetUrl}
-                onChange={(e) => setSheetUrl(e.target.value)}
-                className="w-full text-xs py-2.5 pl-10 pr-4 bg-editorial-card text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
-              />
-            </div>
-            
-            <button 
-              type="submit"
-              disabled={isLoading}
-              className={`text-xs px-4 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center gap-1.5 shrink-0 ${
-                isLoading 
-                ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed' 
-                : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
-              }`}
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Laden</span>
-            </button>
-          </form>
+          <button 
+            id="help-btn"
+            onClick={() => setShowConfigModal(true)} 
+            className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-editorial-moss hover:bg-editorial-card rounded-full flex items-center"
+            title="Anleitung anzeigen"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
@@ -1318,7 +1327,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTAINER (Single Column Layout) */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto">
+      <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-editorial-muted px-1 pb-3 border-b border-editorial-border/40 gap-3">
@@ -1347,21 +1356,20 @@ export default function App() {
             <div className="bg-editorial-card border border-editorial-border rounded-xl p-12 text-center flex flex-col items-center justify-center font-sans">
               <Compass className="w-10 h-10 text-editorial-muted mb-2 stroke-1 animate-pulse" />
               <h4 className="font-serif italic text-editorial-text text-xl font-bold">Keine Campingplätze vorhanden</h4>
-              <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Fügen Sie oben Ihren Google-Sheets-Link ein und klicken Sie auf „Laden“, um Ihre Campingplätze anzuzeigen.</p>
+              <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Fügen Sie unten Ihren Google-Sheets-Link ein und klicken Sie auf „Laden“, um Ihre Campingplätze anzuzeigen.</p>
             </div>
           ) : (
             sortedCampsites.map((camp) => {
-              const isSelected = selectedCampgroundId === camp.id;
+              const isExpanded = expandedCampIds.has(camp.id);
 
               return (
                 <div 
                   key={camp.id} 
                   id={`camp-card-${camp.id}`}
-                  onClick={() => setSelectedCampgroundId(isSelected ? null : camp.id)}
-                  className={`bg-editorial-card border text-left rounded-xl overflow-hidden shadow-xs transition-all duration-300 hover:shadow-md cursor-pointer flex flex-col ${
-                    isSelected 
-                    ? 'border-editorial-moss ring-1 ring-editorial-moss ring-offset-[1px]' 
-                    : 'border-editorial-border hover:border-editorial-muted'
+                  className={`bg-editorial-card border text-left rounded-xl overflow-hidden transition-all duration-300 flex flex-col ${
+                    isExpanded 
+                    ? 'border-editorial-border shadow-[0_4px_16px_rgba(60,58,52,0.10)]' 
+                    : 'border-editorial-border shadow-xs hover:shadow-sm'
                   }`}
                 >
                   
@@ -1464,19 +1472,11 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Right action block */}
-                    <div className="md:w-28 bg-[#FAF9F6] p-3 flex md:flex-col justify-between md:justify-center items-center gap-2 shrink-0">
-                      <div className="text-xs text-editorial-moss font-bold shrink-0 flex items-center gap-1 self-end md:self-center">
-                        <span className="text-[10px] md:text-xs">{isSelected ? 'Zuklappen' : 'Details'}</span>
-                        <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'rotate-90' : ''}`} />
-                      </div>
-                    </div>
-
                   </div>
 
                   {/* EXPANDABLE COLLAPSIBLE DRAWER FOR EXTRA COLUMNS & RECORDS */}
-                  {isSelected && (
-                    <div className="bg-[#FAF9F6] border-t border-editorial-border p-5 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                  {isExpanded && (
+                    <div className="bg-[#FAF9F6] border-t border-editorial-border p-5">
                       {(() => {
                         const mapKey = Object.keys(camp.raw).find(k => {
                           const l = k.toLowerCase().trim();
@@ -1496,37 +1496,37 @@ export default function App() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               {/* Map (Karte) Block */}
                               <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                <span className="text-[10px] font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
+                                <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
                                 {mapVal ? (
                                   <a 
                                     href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
-                                    className="text-xs text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-1.5"
+                                    className="text-sm text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-2"
                                   >
-                                    <Navigation className="w-3.5 h-3.5 shrink-0" />
+                                    <Navigation className="w-4 h-4 shrink-0" />
                                     <span>Google Maps</span>
                                   </a>
                                 ) : (
-                                  <span className="text-xs text-editorial-muted italic block mt-1.5">Keine Karte hinterlegt</span>
+                                  <span className="text-sm text-editorial-muted italic block mt-2">Keine Karte hinterlegt</span>
                                 )}
                               </div>
 
                               {/* URL Website Block */}
                               <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                <span className="text-[10px] font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
+                                <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
                                 {urlVal ? (
                                   <a 
                                     href={urlVal.startsWith('http') ? urlVal : `https://${urlVal}`} 
                                     target="_blank" 
                                     rel="noopener noreferrer" 
-                                    className="text-xs text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-1.5"
+                                    className="text-sm text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-2"
                                   >
-                                    <Info className="w-3.5 h-3.5 shrink-0" />
+                                    <Info className="w-4 h-4 shrink-0" />
                                     <span>Pin Camp</span>
                                   </a>
                                 ) : (
-                                  <span className="text-xs text-editorial-muted italic block mt-1.5">Keine Website hinterlegt</span>
+                                  <span className="text-sm text-editorial-muted italic block mt-2">Keine Website hinterlegt</span>
                                 )}
                               </div>
                             </div>
@@ -1534,30 +1534,71 @@ export default function App() {
                           </>
                         );
                       })()}
-                      
-                      <div className="flex justify-end mt-4">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedCampgroundId(null);
-                          }}
-                          className="bg-[#EAE8E0] hover:bg-[#DEDCD2] text-editorial-text font-bold text-xs py-2 px-5 rounded-full transition-all"
-                        >
-                          Details zuklappen
-                        </button>
-                      </div>
                     </div>
                   )}
+
+                  {/* Card footer — Details toggle */}
+                  <div className="border-t border-editorial-border bg-[#FAF9F6] px-5 py-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => toggleCampExpanded(camp.id)}
+                      className="text-sm text-editorial-moss font-bold flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+                    >
+                      <span>{isExpanded ? 'Details zuklappen' : 'Details'}</span>
+                      <ChevronRight className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                    </button>
+                  </div>
 
                 </div>
               );
             })
           )}
         </div>
+
+        {/* SPREADSHEET URL BOX */}
+        <div className="bg-[#FAF9F6] border border-editorial-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex gap-3">
+            <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center">
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-serif italic text-editorial-moss text-base font-serif">
+                Google-Tabelle verbinden
+              </h3>
+              <p className="text-xs text-[#5C5952] leading-relaxed mt-0.5 font-sans">
+                Öffentlich freigegebenen Sheets-Link einfügen, um die Campingliste zu laden oder zu aktualisieren.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSheetSync} className="flex items-center gap-2 w-full sm:w-auto sm:max-w-md shrink-0 sm:ml-auto">
+            <div className="relative flex-1 min-w-0">
+              <input 
+                type="url"
+                placeholder="Google-Sheets-Link..."
+                value={sheetUrl}
+                onChange={(e) => setSheetUrl(e.target.value)}
+                className="w-full text-xs py-2.5 px-4 bg-editorial-card text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={isLoading}
+              className={`text-xs px-4 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center gap-1.5 shrink-0 ${
+                isLoading 
+                ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed' 
+                : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
+              }`}
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>Laden</span>
+            </button>
+          </form>
+        </div>
       </main>
 
       {/* OFFLINE STATUS BORDER BOX */}
-      <div className="max-w-4xl w-full mx-auto px-4 mb-6 mt-2">
+      <div className={`${CONTENT_MAX_W} w-full mx-auto px-4 mb-6 mt-2`}>
         <div className="bg-[#FAF9F6] border border-editorial-border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex gap-3">
             <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center">
@@ -1585,7 +1626,7 @@ export default function App() {
 
       {/* FOOTER */}
       <footer className="bg-editorial-card border-t border-editorial-border py-8 px-4 text-center text-xs text-editorial-muted shrink-0 mt-auto">
-        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 font-sans">
+        <div className={`${CONTENT_MAX_W} mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 font-sans`}>
           <span>Camp-Finder &copy; 2026. Mads privater Camping Begleiter.</span>
           <span className="flex items-center gap-1.5 text-editorial-moss font-bold uppercase tracking-wider text-[10px]">
             <span>Camping &bull; Die Kunst, Komfort gegen Freiheit zu tauschen</span>
@@ -1645,7 +1686,7 @@ export default function App() {
                 <ol className="list-decimal list-inside pl-1 space-y-1 font-sans">
                   <li>Klicken Sie in Ihrer Google-Tabelle oben rechts auf den großen Button <b>Freigeben</b>.</li>
                   <li>Ändern Sie unter Allgemeiner Zugriff "Eingeschränkt" auf <b>"Jeder, der über den Link verfügt, kann lesen"</b>.</li>
-                  <li>Kopieren Sie diesen Link und fügen Sie ihn direkt in das Eingabefeld oben im Camping-Register ein!</li>
+                  <li>Kopieren Sie diesen Link und fügen Sie ihn in das Eingabefeld unten in der Campingliste ein!</li>
                 </ol>
               </div>
 
@@ -1653,7 +1694,7 @@ export default function App() {
                 <Info className="w-4 h-4 text-editorial-moss shrink-0 mt-0.5" />
                 <div className="text-editorial-text">
                   <strong className="text-editorial-moss block mb-0.5">Erster Start</strong>
-                  Beim ersten Besuch wird Ihre hinterlegte Google-Tabelle automatisch geladen. Sie können jederzeit einen anderen Sheets-Link oben einfügen und auf „Laden“ klicken.
+                  Beim ersten Besuch wird Ihre hinterlegte Google-Tabelle automatisch geladen. Sie können jederzeit einen anderen Sheets-Link unten einfügen und auf „Laden“ klicken.
                 </div>
               </div>
             </div>
