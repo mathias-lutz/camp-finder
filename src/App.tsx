@@ -1561,8 +1561,9 @@ export default function App() {
           latitude: c.latitude as number,
           longitude: c.longitude as number,
           mapLink: c.mapLink,
+          isFavorite: favoriteIds.has(c.id),
         })),
-    [campsites]
+    [campsites, favoriteIds]
   );
 
   useEffect(() => {

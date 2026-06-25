@@ -10,6 +10,7 @@ export interface MapCamp {
   latitude: number;
   longitude: number;
   mapLink?: string;
+  isFavorite?: boolean;
 }
 
 interface CampMapOverviewProps {
@@ -22,6 +23,8 @@ interface CampMapOverviewProps {
 
 const MOSS = '#3E4D40';
 const MOSS_DARK = '#2D3A2F';
+const FAVORITE = '#ef4444';
+const FAVORITE_DARK = '#dc2626';
 const LINK_STYLE = `color:${MOSS};font-size:12px;font-weight:600;text-decoration:underline;text-underline-offset:2px;`;
 
 function escapeHtml(text: string): string {
@@ -54,19 +57,26 @@ function buildPopupHtml(camp: MapCamp): string {
   `;
 }
 
-function createCampIcon(active: boolean): L.DivIcon {
+function createCampIcon(active: boolean, isFavorite: boolean): L.DivIcon {
   const size = active ? 34 : 28;
-  const color = active ? MOSS_DARK : MOSS;
+  const color = isFavorite ? (active ? FAVORITE_DARK : FAVORITE) : (active ? MOSS_DARK : MOSS);
+  const heartSize = Math.round(size * 0.42);
+  const heart = isFavorite
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="${heartSize}" height="${heartSize}" viewBox="0 0 24 24" fill="#FAF9F6" style="position:absolute;top:50%;left:50%;margin-top:-${Math.round(size * 0.08)}px;transform:translate(-50%,-50%) rotate(45deg);pointer-events:none;"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
+    : '';
+
   return L.divIcon({
     className: 'custom-camp-pin',
-    html: `<div style="
-      width:${size}px;height:${size}px;
-      background:${color};
-      border:2.5px solid #FAF9F6;
-      border-radius:50% 50% 50% 0;
-      transform:rotate(-45deg);
-      box-shadow:0 2px 8px rgba(60,58,52,0.25);
-    "></div>`,
+    html: `<div style="position:relative;width:${size}px;height:${size}px;">
+      <div style="
+        width:${size}px;height:${size}px;
+        background:${color};
+        border:2.5px solid #FAF9F6;
+        border-radius:50% 50% 50% 0;
+        transform:rotate(-45deg);
+        box-shadow:0 2px 8px rgba(60,58,52,0.25);
+      "></div>${heart}
+    </div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size],
     popupAnchor: [0, -size + 4],
@@ -142,7 +152,7 @@ export function CampMapOverview({ camps, focusCampId, userCoords, onClose, onSho
       bounds.extend(latLng);
 
       const marker = L.marker(latLng, {
-        icon: createCampIcon(focusCampId === camp.id),
+        icon: createCampIcon(focusCampId === camp.id, !!camp.isFavorite),
         title: camp.name,
       });
 
@@ -150,7 +160,8 @@ export function CampMapOverview({ camps, focusCampId, userCoords, onClose, onSho
 
       marker.on('click', () => {
         markersRef.current.forEach((m, id) => {
-          m.setIcon(createCampIcon(id === camp.id));
+          const c = camps.find(item => item.id === id);
+          m.setIcon(createCampIcon(id === camp.id, !!c?.isFavorite));
         });
         map.flyTo(latLng, Math.max(map.getZoom(), 11), { duration: 0.6 });
         marker.openPopup();
@@ -188,6 +199,9 @@ export function CampMapOverview({ camps, focusCampId, userCoords, onClose, onSho
           <h2 className="font-serif italic text-editorial-moss text-xl font-bold">Kartenübersicht</h2>
           <p className="text-xs text-editorial-muted mt-0.5">
             {camps.length} {camps.length === 1 ? 'Campingplatz' : 'Campingplätze'} auf der Karte
+          </p>
+          <p className="text-[11px] text-editorial-muted/80 mt-1 italic">
+            Standorte können von Google Maps abweichen
           </p>
         </div>
         <button
