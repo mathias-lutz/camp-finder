@@ -25,8 +25,10 @@ import {
   Waves,
   WavesLadder,
   Car,
-  Clock
+  Clock,
+  Map
 } from 'lucide-react';
+import { CampMapOverview } from './CampMapOverview';
 
 // Define the normalized campsite type
 export interface NormalizedCampsite {
@@ -1212,6 +1214,13 @@ export default function App() {
     });
   };
   const [showSettings, setShowSettings] = useState(false);
+  const [showMapOverview, setShowMapOverview] = useState(false);
+  const [mapFocusCampId, setMapFocusCampId] = useState<string | null>(null);
+
+  const openMapOverview = (campId: string | null = null) => {
+    setMapFocusCampId(campId);
+    setShowMapOverview(true);
+  };
 
   // User Geolocation Coordinates (Defaults to Zurich, Switzerland to calculate immediately)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>(() => ({ lat: 47.3769, lng: 8.5417 }));
@@ -1530,6 +1539,20 @@ export default function App() {
     }
   }, [campsites, sortBy, drivingTimes, favoriteIds]);
 
+  const mapCamps = useMemo(
+    () =>
+      campsites
+        .filter(c => c.latitude !== null && c.longitude !== null)
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          state: c.state,
+          latitude: c.latitude as number,
+          longitude: c.longitude as number,
+        })),
+    [campsites]
+  );
+
   useEffect(() => {
     const fromCamps = extractSheetSlug(campsites);
     if (fromCamps) setSheetSlug(fromCamps);
@@ -1584,7 +1607,18 @@ export default function App() {
         
         {/* TOTAL AND SORT SELECTOR BAR */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between text-sm text-editorial-muted px-1 pb-3 border-b border-editorial-border/40 gap-3">
-          <span>Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
+          <div className="flex flex-col gap-2">
+            <span>Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
+            <button
+              type="button"
+              onClick={() => openMapOverview()}
+              disabled={mapCamps.length === 0}
+              className="inline-flex items-center gap-1.5 self-start text-sm text-editorial-moss font-bold border border-editorial-border bg-editorial-card hover:bg-[#EAE8E0] disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 rounded-xl transition-colors"
+            >
+              <Map className="w-4 h-4 shrink-0" />
+              <span>Übersicht</span>
+            </button>
+          </div>
           
           <div className="flex items-center gap-2">
             <span className="font-sans uppercase tracking-[0.1em] text-[11px] font-bold text-editorial-muted">Sortieren:</span>
@@ -1794,18 +1828,31 @@ export default function App() {
                           <>
                             <div className="grid grid-cols-2 gap-2 sm:gap-4">
                               {/* Map (Karte) Block */}
-                              {mapVal ? (
-                                <a
-                                  href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
-                                >
-                                  <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
-                                    <Navigation className="w-4 h-4 shrink-0" />
-                                    <span>Google Maps</span>
-                                  </span>
-                                </a>
+                              {mapVal || (camp.latitude !== null && camp.longitude !== null) ? (
+                                camp.latitude !== null && camp.longitude !== null ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openMapOverview(camp.id)}
+                                    className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0 text-left w-full"
+                                  >
+                                    <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                      <Map className="w-4 h-4 shrink-0" />
+                                      <span>Karte</span>
+                                    </span>
+                                  </button>
+                                ) : (
+                                  <a
+                                    href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
+                                  >
+                                    <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                      <Navigation className="w-4 h-4 shrink-0" />
+                                      <span>Google Maps</span>
+                                    </span>
+                                  </a>
+                                )
                               ) : (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
@@ -1869,6 +1916,18 @@ export default function App() {
           </span>
         </div>
       </footer>
+
+      {showMapOverview && (
+        <CampMapOverview
+          camps={mapCamps}
+          focusCampId={mapFocusCampId}
+          userCoords={userCoords}
+          onClose={() => {
+            setShowMapOverview(false);
+            setMapFocusCampId(null);
+          }}
+        />
+      )}
 
       {/* SETTINGS PANEL */}
       {showSettings && (
