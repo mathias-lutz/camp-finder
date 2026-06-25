@@ -3,7 +3,7 @@ import {
   RotateCw, 
   MapPin, 
   Info, 
-  HelpCircle, 
+  Settings,
   Check, 
   X, 
   Compass, 
@@ -70,19 +70,32 @@ type SortBy =
   | 'south-to-north'
   | 'north-to-south'
   | 'east-to-west'
-  | 'west-to-east';
+  | 'west-to-east'
+  | 'favorites-only';
 
 const SORT_BY_OPTIONS: SortBy[] = [
   'default', 'rating', 'price', 'near-to-far', 'far-to-near',
-  'south-to-north', 'north-to-south', 'east-to-west', 'west-to-east', 'alphabet',
+  'south-to-north', 'north-to-south', 'east-to-west', 'west-to-east',
+  'favorites-only', 'alphabet',
 ];
+
+function loadFavoriteIds(): Set<string> {
+  try {
+    const saved = localStorage.getItem('campground_favorites');
+    if (saved) {
+      const ids = JSON.parse(saved);
+      if (Array.isArray(ids)) return new Set(ids.filter((id): id is string => typeof id === 'string'));
+    }
+  } catch { /* ignore */ }
+  return new Set();
+}
 
 function loadSavedSortBy(): SortBy {
   try {
     const saved = localStorage.getItem('campground_sort_by');
     if (saved && SORT_BY_OPTIONS.includes(saved as SortBy)) return saved as SortBy;
   } catch { /* ignore */ }
-  return 'default';
+  return 'near-to-far';
 }
 
 const CAMP_IMAGE_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(
@@ -1175,6 +1188,21 @@ export default function App() {
   // Selected campground highlight trigger
   const [expandedCampIds, setExpandedCampIds] = useState<Set<string>>(() => new Set());
 
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(loadFavoriteIds);
+
+  useEffect(() => {
+    localStorage.setItem('campground_favorites', JSON.stringify([...favoriteIds]));
+  }, [favoriteIds]);
+
+  const toggleFavorite = (id: string) => {
+    setFavoriteIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const toggleCampExpanded = (id: string) => {
     setExpandedCampIds(prev => {
       const next = new Set(prev);
@@ -1183,7 +1211,7 @@ export default function App() {
       return next;
     });
   };
-  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // User Geolocation Coordinates (Defaults to Zurich, Switzerland to calculate immediately)
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>(() => ({ lat: 47.3769, lng: 8.5417 }));
@@ -1442,7 +1470,10 @@ export default function App() {
 
   // Sort campsites depending on selected sort rules
   const sortedCampsites = useMemo(() => {
-    const list = [...campsites];
+    let list = sortBy === 'favorites-only'
+      ? campsites.filter(c => favoriteIds.has(c.id))
+      : [...campsites];
+
     const sortByDuration = (ascending: boolean) => {
       return list.sort((a, b) => {
         const aMins = getCampDurationMinutes(a.id, drivingTimes);
@@ -1454,7 +1485,9 @@ export default function App() {
       });
     };
 
-    if (sortBy === 'rating') {
+    if (sortBy === 'favorites-only') {
+      return sortByDuration(true);
+    } else if (sortBy === 'rating') {
       return list.sort((a, b) => b.numericRating - a.numericRating);
     } else if (sortBy === 'price') {
       return list.sort((a, b) => a.numericPrice - b.numericPrice);
@@ -1495,7 +1528,7 @@ export default function App() {
     } else {
       return list; // original sheet sequence
     }
-  }, [campsites, sortBy, drivingTimes]);
+  }, [campsites, sortBy, drivingTimes, favoriteIds]);
 
   useEffect(() => {
     const fromCamps = extractSheetSlug(campsites);
@@ -1507,7 +1540,7 @@ export default function App() {
       
       {/* HEADER SECTION */}
       <header className="border-b border-editorial-border py-6 px-4 sm:px-10 shrink-0 relative z-10 bg-editorial-bg text-editorial-text">
-        <div className={`${CONTENT_MAX_W} mx-auto`}>
+        <div className={`${CONTENT_MAX_W} mx-auto relative`}>
           <div className="flex flex-col items-center text-center">
             <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
             {sheetSlug ? (
@@ -1516,6 +1549,16 @@ export default function App() {
               </span>
             ) : null}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="absolute right-0 top-1/2 -translate-y-1/2 p-2.5 text-editorial-moss hover:bg-editorial-card border border-editorial-border rounded-full transition-colors"
+            title="Einstellungen"
+            aria-label="Einstellungen öffnen"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
@@ -1540,23 +1583,24 @@ export default function App() {
       <main className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 overflow-y-auto`}>
         
         {/* TOTAL AND SORT SELECTOR BAR */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-editorial-muted px-1 pb-3 border-b border-editorial-border/40 gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between text-sm text-editorial-muted px-1 pb-3 border-b border-editorial-border/40 gap-3">
           <span>Insgesamt <b>{sortedCampsites.length}</b> Campingplätze</span>
           
           <div className="flex items-center gap-2">
-            <span className="font-sans uppercase tracking-[0.1em] text-[9px] font-bold text-editorial-muted">Sortieren:</span>
+            <span className="font-sans uppercase tracking-[0.1em] text-[11px] font-bold text-editorial-muted">Sortieren:</span>
             <select 
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as SortBy)}
-              className="text-xs py-1.5 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer"
+              className="text-sm py-2 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer"
             >
-              <option value="default">Original-Reihenfolge (Tabelle)</option>
               <option value="near-to-far">Nah zu fern</option>
               <option value="far-to-near">Fern zu nah</option>
               <option value="south-to-north">︽ Süden nach Norden</option>
               <option value="north-to-south">︾ Norden nach Süden</option>
               <option value="east-to-west">« Osten nach Westen</option>
               <option value="west-to-east">» Westen nach Osten</option>
+              <option value="favorites-only">♥ Nur Favoriten</option>
+              <option value="default">Original-Reihenfolge (Tabelle)</option>
               <option value="alphabet">Alphabetisch (A bis Z)</option>
             </select>
           </div>
@@ -1566,13 +1610,24 @@ export default function App() {
         <div className="flex flex-col gap-4">
           {sortedCampsites.length === 0 ? (
             <div className="bg-editorial-card border border-editorial-border rounded-xl p-12 text-center flex flex-col items-center justify-center font-sans">
-              <Compass className="w-10 h-10 text-editorial-muted mb-2 stroke-1 animate-pulse" />
-              <h4 className="font-serif italic text-editorial-text text-xl font-bold">Keine Campingplätze vorhanden</h4>
-              <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Fügen Sie unten Ihren Google-Sheets-Link ein und klicken Sie auf „Laden“, um Ihre Campingplätze anzuzeigen.</p>
+              {sortBy === 'favorites-only' && campsites.length > 0 ? (
+                <>
+                  <Heart className="w-10 h-10 text-editorial-muted mb-2 stroke-1" />
+                  <h4 className="font-serif italic text-editorial-text text-xl font-bold">Keine Favoriten</h4>
+                  <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Tippen Sie auf das Herz bei einem Campingplatz, um ihn als Favorit zu speichern.</p>
+                </>
+              ) : (
+                <>
+                  <Compass className="w-10 h-10 text-editorial-muted mb-2 stroke-1 animate-pulse" />
+                  <h4 className="font-serif italic text-editorial-text text-xl font-bold">Keine Campingplätze vorhanden</h4>
+                  <p className="text-xs text-[#5C5952] mt-1 max-w-xs">Öffnen Sie die Einstellungen und fügen Sie Ihren Google-Sheets-Link ein, um Ihre Campingplätze anzuzeigen.</p>
+                </>
+              )}
             </div>
           ) : (
             sortedCampsites.map((camp) => {
               const isExpanded = expandedCampIds.has(camp.id);
+              const isFavorite = favoriteIds.has(camp.id);
 
               return (
                 <div 
@@ -1609,7 +1664,7 @@ export default function App() {
                     <div className="flex-1 p-5 flex flex-col justify-between bg-editorial-card">
                       <div>
                         <div className="flex items-start justify-between gap-3">
-                          <div>
+                          <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap font-serif">
                               <h3 className="font-serif italic text-editorial-moss text-lg sm:text-xl font-bold leading-tight font-serif">{camp.name}</h3>
                               {camp.state && camp.state !== 'N/A' && (
@@ -1655,6 +1710,24 @@ export default function App() {
                               );
                             })()}
                           </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavorite(camp.id);
+                            }}
+                            aria-label={isFavorite ? 'Aus Favoriten entfernen' : 'Als Favorit speichern'}
+                            aria-pressed={isFavorite}
+                            className="shrink-0 p-1.5 rounded-full hover:bg-[#FAF9F6] transition-colors"
+                          >
+                            <Heart
+                              className={`w-5 h-5 transition-colors ${
+                                isFavorite
+                                  ? 'fill-red-500 text-red-500'
+                                  : 'text-editorial-muted hover:text-red-400'
+                              }`}
+                            />
+                          </button>
                         </div>
                       </div>
 
@@ -1785,86 +1858,7 @@ export default function App() {
             })
           )}
         </div>
-
-        {/* SPREADSHEET URL BOX */}
-        <div className="bg-[#FAF9F6] border border-editorial-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex gap-3">
-            <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-serif italic text-editorial-moss text-base font-serif">
-                Google-Tabelle verbinden
-              </h3>
-              <p className="text-xs text-[#5C5952] leading-relaxed mt-0.5 font-sans">
-                Öffentlich freigegebenen Sheets-Link einfügen, um die Campingliste zu laden oder zu aktualisieren.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 sm:ml-auto">
-            <form onSubmit={handleSheetSync} className="flex items-center gap-2 flex-1 sm:max-w-md min-w-0">
-              <div className="relative flex-1 min-w-0">
-                <input 
-                  type="url"
-                  placeholder="Google-Sheets-Link..."
-                  value={sheetUrl}
-                  onChange={(e) => setSheetUrl(e.target.value)}
-                  className="w-full text-xs py-2.5 px-4 bg-editorial-card text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
-                />
-              </div>
-              <button 
-                type="submit"
-                disabled={isLoading}
-                className={`text-xs px-4 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center gap-1.5 shrink-0 ${
-                  isLoading 
-                  ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed' 
-                  : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
-                }`}
-              >
-                <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                <span>Laden</span>
-              </button>
-            </form>
-            <button
-              id="help-btn"
-              type="button"
-              onClick={() => setShowConfigModal(true)}
-              className="p-2.5 text-editorial-moss hover:bg-[#F2F0EA] border border-editorial-border rounded-full shrink-0 transition-colors"
-              title="Anleitung anzeigen"
-            >
-              <HelpCircle className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
       </main>
-
-      {/* OFFLINE STATUS BORDER BOX */}
-      <div className={`${CONTENT_MAX_W} w-full mx-auto px-4 mb-6 mt-2`}>
-        <div className="bg-[#FAF9F6] border border-editorial-border rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex gap-3">
-            <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center">
-              <CloudOff className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-serif italic text-editorial-moss text-base flex items-center gap-1.5 font-serif">
-                Offline-bereites Register
-              </h3>
-              <p className="text-xs text-[#5C5952] leading-relaxed mt-0.5 font-sans">
-                Alle Daten der Campings werden im Browser zwischengespeichert – für eine schnelle und sichere Nutzung ganz ohne Netzempfang in der Wildnis.
-              </p>
-            </div>
-          </div>
-          
-          <button 
-            onClick={() => setShowConfigModal(true)}
-            className="text-editorial-moss text-xs font-bold hover:underline flex items-center gap-1 shrink-0 bg-[#F2F0EA] border border-editorial-border hover:bg-[#EAE8E0] px-3.5 py-1.5 rounded-full"
-          >
-            <Info className="w-3.5 h-3.5 text-editorial-moss" />
-            <span>Format-Anleitung</span>
-          </button>
-        </div>
-      </div>
 
       {/* FOOTER */}
       <footer className="bg-editorial-card border-t border-editorial-border py-8 px-4 text-center text-xs text-editorial-muted shrink-0 mt-auto">
@@ -1876,77 +1870,143 @@ export default function App() {
         </div>
       </footer>
 
-      {/* CONFIG SLIDEOUT MODAL HELP GUIDE */}
-      {showConfigModal && (
-        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in font-sans">
-          <div className="bg-editorial-card border border-editorial-border rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 shadow-2xl relative">
-            <button 
-              onClick={() => setShowConfigModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-[#EAE8E0] text-editorial-text transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-start gap-3.5 mb-4">
-              <div className="p-2.5 bg-editorial-moss text-[#FAF9F6] rounded-lg">
-                <FileSpreadsheet className="w-6 h-6" />
+      {/* SETTINGS PANEL */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-xs flex items-start justify-center p-4 sm:p-6 z-50 animate-fade-in font-sans overflow-y-auto">
+          <div className="bg-editorial-card border border-editorial-border rounded-xl max-w-lg w-full my-4 sm:my-8 shadow-2xl relative">
+            <div className="sticky top-0 z-10 bg-editorial-card border-b border-editorial-border px-6 py-4 flex items-center justify-between rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-editorial-moss/10 text-editorial-moss rounded-lg">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <h2 className="font-serif italic text-editorial-moss text-xl font-bold">Einstellungen</h2>
               </div>
-              <div>
-                <h3 className="font-serif italic text-editorial-moss text-lg font-bold font-serif">Google-Sheets-Einrichtungsanleitung</h3>
-                <p className="text-xs text-editorial-muted">Hier erfahren Sie, wie Sie Ihre eigene Camping-Tabelle verbinden.</p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="p-1.5 rounded-full hover:bg-[#EAE8E0] text-editorial-text transition-colors"
+                aria-label="Einstellungen schließen"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="space-y-4 text-editorial-text font-sans text-xs leading-relaxed">
-              
-              <div className="space-y-1.5">
-                <h4 className="font-sans font-bold text-editorial-moss text-xs">1. Die eigene Camping-Tabelle formatieren</h4>
-                <p>Achten Sie darauf, dass die erste Zeile verständliche Spaltenüberschriften enthält. Das System nutzt **Fuzzy Column Intelligence**, um Spalten automatisch zuzuordnen. Folgende Begriffe (oder ähnliche) werden erkannt:</p>
-                <div className="bg-editorial-bg p-3 rounded-xl border border-editorial-border font-sans text-[10px] text-[#5C5952] grid grid-cols-2 gap-2">
-                  <div>• <b>Name</b> (Campingplatz, Ort, Name)</div>
-                  <div>• <b>Bemerkungen</b> (Notizen, Erfahrungen)</div>
+            <div className="px-6 py-5 space-y-6">
+              {/* Google Sheet sync */}
+              <section>
+                <div className="flex gap-3 mb-4">
+                  <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center h-fit">
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif italic text-editorial-moss text-base font-serif">
+                      Google-Tabelle verbinden
+                    </h3>
+                    <p className="text-xs text-[#5C5952] leading-relaxed mt-0.5">
+                      Öffentlich freigegebenen Sheets-Link einfügen, um die Campingliste zu laden oder zu aktualisieren.
+                    </p>
+                  </div>
                 </div>
 
-                <p className="mt-2 text-[11px] text-[#5C5952]">
-                  <b>Zusatz-Ausstattung (mit "x", "yes" oder "ja" markieren):</b>
-                </p>
-                <div className="bg-editorial-bg p-3 rounded-xl border border-editorial-border font-sans text-[10px] text-[#5C5952] grid grid-cols-2 gap-2">
-                  <div>• <b>Laden</b> (Bedarfsartikel / Lebensmittelladen)</div>
-                  <div>• <b>Restaurant</b></div>
-                  <div>• <b>Imbiss</b> (Snack bar)</div>
-                  <div>• <b>Brot</b> (Frisches Brot / Brötchenservice)</div>
-                  <div>• <b>Meer</b> (Meerblick / Strandnähe)</div>
-                  <div>• <b>See</b> (Seeufer / Seezugang)</div>
-                  <div>• <b>Fluss</b> (Flussufer / Flusszugang)</div>
-                  <div>• <b>Pool</b> (Schwimmbad / Pool)</div>
-                </div>
-              </div>
+                <form onSubmit={handleSheetSync} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="url"
+                    placeholder="Google-Sheets-Link..."
+                    value={sheetUrl}
+                    onChange={(e) => setSheetUrl(e.target.value)}
+                    className="flex-1 min-w-0 text-sm py-2.5 px-4 bg-[#FAF9F6] text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className={`text-xs px-5 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center justify-center gap-1.5 shrink-0 ${
+                      isLoading
+                        ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed'
+                        : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
+                    }`}
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                    <span>Laden</span>
+                  </button>
+                </form>
+              </section>
 
-              <div className="space-y-1.5">
-                <h4 className="font-sans font-bold text-editorial-moss text-xs">2. Freigabe einrichten (CORS-frei)</h4>
-                <p>Google Sheets schränkt direkte Abfragen standardmäßig ein. Folgen Sie dieser einfachen Anleitung:</p>
-                <ol className="list-decimal list-inside pl-1 space-y-1 font-sans">
-                  <li>Klicken Sie in Ihrer Google-Tabelle oben rechts auf den großen Button <b>Freigeben</b>.</li>
-                  <li>Ändern Sie unter Allgemeiner Zugriff "Eingeschränkt" auf <b>"Jeder, der über den Link verfügt, kann lesen"</b>.</li>
-                  <li>Kopieren Sie diesen Link und fügen Sie ihn in das Eingabefeld unten in der Campingliste ein!</li>
-                </ol>
-              </div>
-
-              <div className="bg-editorial-bg border border-editorial-border p-3.5 rounded-lg flex items-start gap-2.5 font-sans">
-                <Info className="w-4 h-4 text-editorial-moss shrink-0 mt-0.5" />
-                <div className="text-editorial-text">
-                  <strong className="text-editorial-moss block mb-0.5">Erster Start</strong>
-                  Beim ersten Besuch wird Ihre hinterlegte Google-Tabelle automatisch geladen. Sie können jederzeit einen anderen Sheets-Link unten einfügen und auf „Laden“ klicken.
+              {/* Format-Anleitung */}
+              <section className="border-t border-editorial-border pt-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Info className="w-4 h-4 text-editorial-moss" />
+                  <h3 className="font-serif italic text-editorial-moss text-base font-bold">Format-Anleitung</h3>
                 </div>
-              </div>
+
+                <div className="space-y-4 text-editorial-text text-xs leading-relaxed">
+                  <div className="space-y-1.5">
+                    <h4 className="font-sans font-bold text-editorial-moss text-xs">1. Die eigene Camping-Tabelle formatieren</h4>
+                    <p>Die erste Zeile sollte verständliche Spaltenüberschriften enthalten. Das System ordnet Spalten automatisch zu. Folgende Begriffe (oder ähnliche) werden erkannt:</p>
+                    <div className="bg-[#FAF9F6] p-3 rounded-xl border border-editorial-border font-sans text-[10px] text-[#5C5952] grid grid-cols-2 gap-2">
+                      <div>• <b>Name</b> (Campingplatz, Ort, Name)</div>
+                      <div>• <b>Bemerkungen</b> (Notizen, Erfahrungen)</div>
+                    </div>
+
+                    <p className="mt-2 text-[11px] text-[#5C5952]">
+                      <b>Zusatz-Ausstattung (mit &quot;x&quot;, &quot;yes&quot; oder &quot;ja&quot; markieren):</b>
+                    </p>
+                    <div className="bg-[#FAF9F6] p-3 rounded-xl border border-editorial-border font-sans text-[10px] text-[#5C5952] grid grid-cols-2 gap-2">
+                      <div>• <b>Laden</b> (Bedarfsartikel / Lebensmittelladen)</div>
+                      <div>• <b>Restaurant</b></div>
+                      <div>• <b>Imbiss</b> (Snack bar)</div>
+                      <div>• <b>Brot</b> (Frisches Brot / Brötchenservice)</div>
+                      <div>• <b>Meer</b> (Meerblick / Strandnähe)</div>
+                      <div>• <b>See</b> (Seeufer / Seezugang)</div>
+                      <div>• <b>Fluss</b> (Flussufer / Flusszugang)</div>
+                      <div>• <b>Pool</b> (Schwimmbad / Pool)</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <h4 className="font-sans font-bold text-editorial-moss text-xs">2. Freigabe einrichten</h4>
+                    <p>Google Sheets schränkt direkte Abfragen standardmäßig ein. Folgen Sie dieser einfachen Anleitung:</p>
+                    <ol className="list-decimal list-inside pl-1 space-y-1 font-sans">
+                      <li>Klicken Sie in Ihrer Google-Tabelle oben rechts auf den großen Button <b>Freigeben</b>.</li>
+                      <li>Ändern Sie unter Allgemeiner Zugriff &quot;Eingeschränkt&quot; auf <b>&quot;Jeder, der über den Link verfügt, kann lesen&quot;</b>.</li>
+                      <li>Kopieren Sie diesen Link und fügen Sie ihn oben in das Eingabefeld ein.</li>
+                    </ol>
+                  </div>
+
+                  <div className="bg-[#FAF9F6] border border-editorial-border p-3.5 rounded-lg flex items-start gap-2.5">
+                    <Info className="w-4 h-4 text-editorial-moss shrink-0 mt-0.5" />
+                    <div className="text-editorial-text">
+                      <strong className="text-editorial-moss block mb-0.5">Erster Start</strong>
+                      Beim ersten Besuch wird Ihre hinterlegte Google-Tabelle automatisch geladen. Sie können jederzeit einen anderen Sheets-Link oben einfügen und auf „Laden“ klicken.
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Offline hint */}
+              <section className="border-t border-editorial-border pt-6">
+                <div className="bg-[#FAF9F6] border border-editorial-border rounded-xl p-4 flex gap-3">
+                  <div className="bg-editorial-moss/10 text-editorial-moss p-2 rounded-lg shrink-0 flex items-center justify-center h-fit">
+                    <CloudOff className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif italic text-editorial-moss text-base font-serif">
+                      Offline-bereites Register
+                    </h3>
+                    <p className="text-xs text-[#5C5952] leading-relaxed mt-0.5">
+                      Alle Daten der Campings werden im Browser zwischengespeichert – für eine schnelle und sichere Nutzung ganz ohne Netzempfang in der Wildnis.
+                    </p>
+                  </div>
+                </div>
+              </section>
             </div>
 
-            <div className="mt-6 pt-4 border-t border-editorial-border flex justify-end">
-              <button 
-                onClick={() => setShowConfigModal(false)}
+            <div className="px-6 py-4 border-t border-editorial-border flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
                 className="bg-editorial-moss hover:bg-editorial-moss-dark text-white font-bold uppercase tracking-widest py-2 px-6 rounded-full transition-all shadow-xs text-xs"
               >
-                Anleitung Schließen
+                Schließen
               </button>
             </div>
           </div>
