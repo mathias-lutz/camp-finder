@@ -309,7 +309,8 @@ function estimateRouteLocal(lat1: number, lon1: number, lat2: number, lon2: numb
 
   return {
     distance: `${drivingDistance.toFixed(0)} km`,
-    duration: durationStr
+    duration: durationStr,
+    durationMinutes: drivingTimeMins,
   };
 }
 
@@ -402,7 +403,7 @@ async function fetchDrivingTime(
   originLng: number,
   destLat: number,
   destLng: number
-): Promise<{ duration: string; distance: string; isEstimated: boolean }> {
+): Promise<{ duration: string; distance: string; isEstimated: boolean; durationMinutes: number }> {
   try {
     const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=false`;
     const res = await fetch(osrmUrl);
@@ -412,6 +413,7 @@ async function fetchDrivingTime(
         const route = data.routes[0];
         return {
           duration: formatDurationSeconds(route.duration),
+          durationMinutes: Math.round(route.duration / 60),
           distance: `${(route.distance / 1000).toFixed(0)} km`,
           isEstimated: false,
         };
@@ -421,7 +423,29 @@ async function fetchDrivingTime(
     console.warn('OSRM routing unavailable, using straight-line estimate:', err);
   }
   const est = estimateRouteLocal(originLat, originLng, destLat, destLng);
-  return { duration: est.duration, distance: est.distance, isEstimated: true };
+  return { duration: est.duration, distance: est.distance, isEstimated: true, durationMinutes: est.durationMinutes };
+}
+
+function parseDurationToMinutes(duration: string): number | null {
+  const hrMinMatch = duration.match(/(\d+)\s*Std\.?\s*(?:(\d+)\s*Min\.?)?/);
+  if (hrMinMatch) {
+    const hrs = parseInt(hrMinMatch[1], 10);
+    const mins = hrMinMatch[2] ? parseInt(hrMinMatch[2], 10) : 0;
+    return hrs * 60 + mins;
+  }
+  const minMatch = duration.match(/(\d+)\s*Min\.?/);
+  if (minMatch) return parseInt(minMatch[1], 10);
+  return null;
+}
+
+function getCampDurationMinutes(
+  campId: string,
+  times: Record<string, { duration: string; durationMinutes?: number }>
+): number | null {
+  const info = times[campId];
+  if (!info) return null;
+  if (typeof info.durationMinutes === 'number') return info.durationMinutes;
+  return parseDurationToMinutes(info.duration);
 }
 
 async function resolveCoordsAsync(
@@ -627,8 +651,7 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
     image = findValue(['url', 'link']);
   }
 
-  const slugKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === 'slug');
-  const slug = slugKey ? row[slugKey].trim() : '';
+  const slug = findValue(['slug']).trim();
 
   return {
     id,
@@ -662,6 +685,29 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
 
 function extractSheetSlug(camps: NormalizedCampsite[]): string {
   return camps.find(c => c.slug?.trim())?.slug?.trim() || '';
+}
+
+function extractSlugFromParsedRows(rows: Record<string, string>[]): string {
+  for (const row of rows) {
+    for (const [key, val] of Object.entries(row)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalizedKey === 'slug' || normalizedKey.endsWith('slug')) {
+        const trimmed = val?.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+  }
+  return '';
+}
+
+function persistSheetSlug(
+  parsedRows: Record<string, string>[],
+  normalized: NormalizedCampsite[]
+): string {
+  const slug = extractSlugFromParsedRows(parsedRows) || extractSheetSlug(normalized);
+  if (slug) localStorage.setItem('campground_sheet_slug', slug);
+  else localStorage.removeItem('campground_sheet_slug');
+  return slug;
 }
 
 // Helper to determine if a string is a webpage URL rather than a direct image file
@@ -954,12 +1000,23 @@ export default function App() {
     return [];
   });
 
+  const [sheetSlug, setSheetSlug] = useState(() => {
+    try {
+      const saved = localStorage.getItem('campground_sheet_slug');
+      if (saved?.trim()) return saved.trim();
+      const cached = JSON.parse(localStorage.getItem('campground_cached_data') || '[]') as NormalizedCampsite[];
+      return extractSheetSlug(cached);
+    } catch {
+      return '';
+    }
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [syncSuccess, setSyncSuccess] = useState(false);
 
   // Sorting Option
-  const [sortBy, setSortBy] = useState<'default' | 'rating' | 'price' | 'alphabet' | 'south-to-north' | 'north-to-south' | 'east-to-west' | 'west-to-east'>('default');
+  const [sortBy, setSortBy] = useState<'default' | 'rating' | 'price' | 'alphabet' | 'near-to-far' | 'far-to-near' | 'south-to-north' | 'north-to-south' | 'east-to-west' | 'west-to-east'>('default');
 
   // Selected campground highlight trigger
   const [expandedCampIds, setExpandedCampIds] = useState<Set<string>>(() => new Set());
@@ -978,7 +1035,7 @@ export default function App() {
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>(() => ({ lat: 47.3769, lng: 8.5417 }));
 
   // drivingTimes cache map (stored in localStorage)
-  const [drivingTimes, setDrivingTimes] = useState<Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string }>>(() => {
+  const [drivingTimes, setDrivingTimes] = useState<Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string; durationMinutes?: number }>>(() => {
     try {
       const saved = localStorage.getItem('campground_driving_times_v1');
       return saved ? JSON.parse(saved) : {};
@@ -1016,12 +1073,12 @@ export default function App() {
     let active = true;
 
     const fetchTimes = async () => {
-      let cachedTimes: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string }> = {};
+      let cachedTimes: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string; durationMinutes?: number }> = {};
       try {
         cachedTimes = JSON.parse(localStorage.getItem('campground_driving_times_v1') || '{}');
       } catch { /* ignore */ }
 
-      const updates: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey: string }> = {};
+      const updates: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey: string; durationMinutes: number }> = {};
 
       for (const camp of campsites) {
         if (!active) break;
@@ -1178,9 +1235,8 @@ export default function App() {
             localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
             localStorage.setItem('campground_sheet_url', sheetUrl.trim());
             localStorage.setItem('campground_has_synced_user_sheet_v1', 'true');
-            const slug = extractSheetSlug(normalized);
-            if (slug) localStorage.setItem('campground_sheet_slug', slug);
-            else localStorage.removeItem('campground_sheet_slug');
+            const slug = persistSheetSlug(parsedRows, normalized);
+            setSheetSlug(slug);
             setSyncSuccess(true);
           }
         } catch (err: any) {
@@ -1218,9 +1274,8 @@ export default function App() {
       setCampsites(normalized);
       localStorage.setItem('campground_cached_data', JSON.stringify(normalized));
       localStorage.setItem('campground_sheet_url', sheetUrl.trim());
-      const slug = extractSheetSlug(normalized);
-      if (slug) localStorage.setItem('campground_sheet_slug', slug);
-      else localStorage.removeItem('campground_sheet_slug');
+      const slug = persistSheetSlug(parsedRows, normalized);
+      setSheetSlug(slug);
       setExpandedCampIds(new Set());
       setSyncSuccess(true);
     } catch (err: any) {
@@ -1234,10 +1289,25 @@ export default function App() {
   // Sort campsites depending on selected sort rules
   const sortedCampsites = useMemo(() => {
     const list = [...campsites];
+    const sortByDuration = (ascending: boolean) => {
+      return list.sort((a, b) => {
+        const aMins = getCampDurationMinutes(a.id, drivingTimes);
+        const bMins = getCampDurationMinutes(b.id, drivingTimes);
+        if (aMins === null && bMins === null) return 0;
+        if (aMins === null) return 1;
+        if (bMins === null) return -1;
+        return ascending ? aMins - bMins : bMins - aMins;
+      });
+    };
+
     if (sortBy === 'rating') {
       return list.sort((a, b) => b.numericRating - a.numericRating);
     } else if (sortBy === 'price') {
       return list.sort((a, b) => a.numericPrice - b.numericPrice);
+    } else if (sortBy === 'near-to-far') {
+      return sortByDuration(true);
+    } else if (sortBy === 'far-to-near') {
+      return sortByDuration(false);
     } else if (sortBy === 'alphabet') {
       return list.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === 'south-to-north') {
@@ -1271,16 +1341,11 @@ export default function App() {
     } else {
       return list; // original sheet sequence
     }
-  }, [campsites, sortBy]);
+  }, [campsites, sortBy, drivingTimes]);
 
-  const sheetSlug = useMemo(() => {
+  useEffect(() => {
     const fromCamps = extractSheetSlug(campsites);
-    if (fromCamps) return fromCamps;
-    try {
-      return localStorage.getItem('campground_sheet_slug') || '';
-    } catch {
-      return '';
-    }
+    if (fromCamps) setSheetSlug(fromCamps);
   }, [campsites]);
 
   return (
@@ -1288,24 +1353,15 @@ export default function App() {
       
       {/* HEADER SECTION */}
       <header className="border-b border-editorial-border py-6 px-4 sm:px-10 shrink-0 relative z-10 bg-editorial-bg text-editorial-text">
-        <div className={`${CONTENT_MAX_W} mx-auto relative`}>
+        <div className={`${CONTENT_MAX_W} mx-auto`}>
           <div className="flex flex-col items-center text-center">
-            {sheetSlug && (
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-editorial-muted">
+            <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
+            {sheetSlug ? (
+              <span className="text-xs uppercase tracking-[0.2em] font-bold text-editorial-muted mt-1.5">
                 {sheetSlug}
               </span>
-            )}
-            <h1 className="text-3xl font-serif italic tracking-tight text-editorial-moss">Camp-Finder</h1>
+            ) : null}
           </div>
-
-          <button 
-            id="help-btn"
-            onClick={() => setShowConfigModal(true)} 
-            className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-editorial-moss hover:bg-editorial-card rounded-full flex items-center"
-            title="Anleitung anzeigen"
-          >
-            <HelpCircle className="w-5 h-5" />
-          </button>
         </div>
       </header>
 
@@ -1341,11 +1397,13 @@ export default function App() {
               className="text-xs py-1.5 px-3 bg-editorial-card border border-editorial-border rounded-xl focus:outline-none focus:ring-1 focus:ring-editorial-moss focus:border-editorial-moss text-editorial-moss font-semibold cursor-pointer"
             >
               <option value="default">Original-Reihenfolge (Tabelle)</option>
-              <option value="alphabet">Alphabetisch (A bis Z)</option>
+              <option value="near-to-far">Nah zu fern</option>
+              <option value="far-to-near">Fern zu nah</option>
               <option value="south-to-north">︽ Süden nach Norden</option>
               <option value="north-to-south">︾ Norden nach Süden</option>
               <option value="east-to-west">« Osten nach Westen</option>
               <option value="west-to-east">» Westen nach Osten</option>
+              <option value="alphabet">Alphabetisch (A bis Z)</option>
             </select>
           </div>
         </div>
@@ -1366,15 +1424,27 @@ export default function App() {
                 <div 
                   key={camp.id} 
                   id={`camp-card-${camp.id}`}
-                  className={`bg-editorial-card border text-left rounded-xl overflow-hidden transition-all duration-300 flex flex-col ${
+                  className={`group bg-editorial-card border text-left rounded-xl overflow-hidden transition-all duration-300 flex flex-col ${
                     isExpanded 
                     ? 'border-editorial-border shadow-[0_4px_16px_rgba(60,58,52,0.10)]' 
                     : 'border-editorial-border shadow-xs hover:shadow-sm'
                   }`}
                 >
                   
-                  {/* Primary Horizontal Profile Frame */}
-                  <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-editorial-border min-h-[144px]">
+                  {/* Card head — thumbnail + summary (click to toggle) */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    onClick={() => toggleCampExpanded(camp.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleCampExpanded(camp.id);
+                      }
+                    }}
+                    className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-editorial-border min-h-[144px] cursor-pointer"
+                  >
                     
                     {/* Left Thumbnail Photo */}
                     <div className="md:w-1/4 h-36 md:h-auto overflow-hidden relative shrink-0 bg-[#3A3A3A]">
@@ -1382,7 +1452,7 @@ export default function App() {
                     </div>
 
                     {/* Middle Content core */}
-                    <div className="flex-1 p-5 flex flex-col justify-between bg-editorial-card">
+                    <div className={`flex-1 p-5 flex flex-col justify-between transition-colors duration-300 bg-editorial-card group-hover:bg-white ${isExpanded ? 'bg-white' : ''}`}>
                       <div>
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1476,7 +1546,7 @@ export default function App() {
 
                   {/* EXPANDABLE COLLAPSIBLE DRAWER FOR EXTRA COLUMNS & RECORDS */}
                   {isExpanded && (
-                    <div className="bg-[#FAF9F6] border-t border-editorial-border p-5">
+                    <div className="bg-white border-t border-editorial-border p-5">
                       {(() => {
                         const mapKey = Object.keys(camp.raw).find(k => {
                           const l = k.toLowerCase().trim();
@@ -1495,40 +1565,46 @@ export default function App() {
                           <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               {/* Map (Karte) Block */}
-                              <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
-                                {mapVal ? (
-                                  <a 
-                                    href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    className="text-sm text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-2"
-                                  >
+                              {mapVal ? (
+                                <a
+                                  href={mapVal.startsWith('http') ? mapVal : `https://${mapVal}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
+                                >
+                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
+                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5 mt-2">
                                     <Navigation className="w-4 h-4 shrink-0" />
                                     <span>Google Maps</span>
-                                  </a>
-                                ) : (
+                                  </span>
+                                </a>
+                              ) : (
+                                <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
+                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{mapKey}</span>
                                   <span className="text-sm text-editorial-muted italic block mt-2">Keine Karte hinterlegt</span>
-                                )}
-                              </div>
+                                </div>
+                              )}
 
                               {/* URL Website Block */}
-                              <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
-                                <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
-                                {urlVal ? (
-                                  <a 
-                                    href={urlVal.startsWith('http') ? urlVal : `https://${urlVal}`} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    className="text-sm text-editorial-moss hover:underline font-semibold break-all flex items-center gap-1.5 mt-2"
-                                  >
+                              {urlVal ? (
+                                <a
+                                  href={urlVal.startsWith('http') ? urlVal : `https://${urlVal}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors"
+                                >
+                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
+                                  <span className="text-sm text-editorial-moss font-semibold flex items-center gap-1.5 mt-2">
                                     <Info className="w-4 h-4 shrink-0" />
                                     <span>Pin Camp</span>
-                                  </a>
-                                ) : (
+                                  </span>
+                                </a>
+                              ) : (
+                                <div className="bg-[#F2F0EA] p-4 rounded-xl border border-editorial-border font-sans">
+                                  <span className="text-xs font-bold text-editorial-muted uppercase block tracking-wider">{urlKey}</span>
                                   <span className="text-sm text-editorial-muted italic block mt-2">Keine Website hinterlegt</span>
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                             <CampgroundDetailImages url={urlVal} />
                           </>
@@ -1538,10 +1614,13 @@ export default function App() {
                   )}
 
                   {/* Card footer — Details toggle */}
-                  <div className="border-t border-editorial-border bg-[#FAF9F6] px-5 py-3 flex justify-end">
+                  <div className={`border-t border-editorial-border px-5 py-3 flex justify-end transition-colors duration-300 bg-[#FAF9F6] group-hover:bg-white ${isExpanded ? 'bg-white' : ''}`}>
                     <button
                       type="button"
-                      onClick={() => toggleCampExpanded(camp.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCampExpanded(camp.id);
+                      }}
                       className="text-sm text-editorial-moss font-bold flex items-center gap-1.5 hover:opacity-80 transition-opacity"
                     >
                       <span>{isExpanded ? 'Details zuklappen' : 'Details'}</span>
@@ -1571,29 +1650,40 @@ export default function App() {
             </div>
           </div>
 
-          <form onSubmit={handleSheetSync} className="flex items-center gap-2 w-full sm:w-auto sm:max-w-md shrink-0 sm:ml-auto">
-            <div className="relative flex-1 min-w-0">
-              <input 
-                type="url"
-                placeholder="Google-Sheets-Link..."
-                value={sheetUrl}
-                onChange={(e) => setSheetUrl(e.target.value)}
-                className="w-full text-xs py-2.5 px-4 bg-editorial-card text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
-              />
-            </div>
-            <button 
-              type="submit"
-              disabled={isLoading}
-              className={`text-xs px-4 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center gap-1.5 shrink-0 ${
-                isLoading 
-                ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed' 
-                : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
-              }`}
+          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 sm:ml-auto">
+            <form onSubmit={handleSheetSync} className="flex items-center gap-2 flex-1 sm:max-w-md min-w-0">
+              <div className="relative flex-1 min-w-0">
+                <input 
+                  type="url"
+                  placeholder="Google-Sheets-Link..."
+                  value={sheetUrl}
+                  onChange={(e) => setSheetUrl(e.target.value)}
+                  className="w-full text-xs py-2.5 px-4 bg-editorial-card text-editorial-text placeholder-editorial-muted/70 rounded-full border border-editorial-border focus:outline-none focus:border-editorial-moss focus:ring-1 focus:ring-editorial-moss transition-all shadow-inner"
+                />
+              </div>
+              <button 
+                type="submit"
+                disabled={isLoading}
+                className={`text-xs px-4 py-2.5 font-bold uppercase tracking-wider rounded-full text-white shadow transition-all flex items-center gap-1.5 shrink-0 ${
+                  isLoading 
+                  ? 'bg-editorial-moss/50 text-white/55 cursor-not-allowed' 
+                  : 'bg-editorial-moss hover:bg-editorial-moss-dark active:scale-95'
+                }`}
+              >
+                <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                <span>Laden</span>
+              </button>
+            </form>
+            <button
+              id="help-btn"
+              type="button"
+              onClick={() => setShowConfigModal(true)}
+              className="p-2.5 text-editorial-moss hover:bg-[#F2F0EA] border border-editorial-border rounded-full shrink-0 transition-colors"
+              title="Anleitung anzeigen"
             >
-              <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Laden</span>
+              <HelpCircle className="w-5 h-5" />
             </button>
-          </form>
+          </div>
         </div>
       </main>
 
