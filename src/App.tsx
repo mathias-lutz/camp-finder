@@ -326,15 +326,6 @@ async function fetchSheetCsv(sheetUrl: string): Promise<string> {
   return response.text();
 }
 
-// Client-side coordinate resolution (replaces /api/resolve-coords on static hosts).
-function resolveCoordsClient(mapLink: string, name: string): { lat: number; lng: number } | null {
-  if (mapLink) {
-    const coords = extractCoordsFromUrl(mapLink);
-    if (coords) return coords;
-  }
-  return getHardcodedCoords(name);
-}
-
 // Quoted CSV parser
 function parseCSV(text: string): Record<string, string>[] {
   const lines: string[] = [];
@@ -396,10 +387,12 @@ function extractCoordsFromUrl(url: string | null): { lat: number, lng: number } 
     const decodedUrl = decodeURIComponent(url);
     
     const patterns = [
-      /[@/](-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/, // e.g. @46.123,-121.456 or /46.123,-121.456
-      /query=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/, // e.g. query=34.5,-112.4
-      /q=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/, // e.g. q=34.5,-112.4
-      /place\/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/ // e.g. place/47.1,8.2
+      /[@/](-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+      /query=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+      /q=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+      /place\/[^/]+\/([-?\d.]+),([-?\d.]+)/,
+      /place\/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
+      /ll=(-?\d+\.\d+),(-?\d+\.\d+)/,
     ];
 
     for (const regex of patterns) {
@@ -484,6 +477,204 @@ function getHardcodedCoords(name: string): { lat: number; lng: number } | null {
     return { lat: 48.6183, lng: -3.8569 }; // Camping Baie de Térénez
   }
   return null;
+}
+
+function extractCoordsFromHtml(html: string): { lat: number; lng: number } | null {
+  const staticMapMatch =
+    html.match(/staticmap\?[^"']*center=(-?\d+\.\d+)%2C(-?\d+\.\d+)/i) ||
+    html.match(/center=(-?\d+\.\d+),(-?\d+\.\d+)/i);
+  if (staticMapMatch?.[1] && staticMapMatch?.[2]) {
+    const lat = parseFloat(staticMapMatch[1]);
+    const lng = parseFloat(staticMapMatch[2]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  const llMatch = html.match(/[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/i);
+  if (llMatch?.[1] && llMatch?.[2]) {
+    const lat = parseFloat(llMatch[1]);
+    const lng = parseFloat(llMatch[2]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  const mapsUrlMatch = html.match(/https:\/\/(?:www\.)?google\.[^"'<>\s]+/i);
+  if (mapsUrlMatch) {
+    return extractCoordsFromUrl(decodeURIComponent(mapsUrlMatch[0]));
+  }
+  return null;
+}
+
+async function fetchPageHtml(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const direct = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (direct.ok) return direct.text();
+  } catch {
+    clearTimeout(timeoutId);
+  }
+
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  const proxyRes = await fetch(proxyUrl);
+  if (!proxyRes.ok) {
+    throw new Error(`Failed to fetch page (${proxyRes.status})`);
+  }
+  return proxyRes.text();
+}
+
+function formatDurationSeconds(seconds: number): string {
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} Min.`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? `${hrs} Std. ${rem} Min.` : `${hrs} Std.`;
+}
+
+async function fetchDrivingTime(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number
+): Promise<{ duration: string; distance: string; isEstimated: boolean }> {
+  try {
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${originLng},${originLat};${destLng},${destLat}?overview=false`;
+    const res = await fetch(osrmUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes?.[0]) {
+        const route = data.routes[0];
+        return {
+          duration: formatDurationSeconds(route.duration),
+          distance: `${(route.distance / 1000).toFixed(0)} km`,
+          isEstimated: false,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('OSRM routing unavailable, using straight-line estimate:', err);
+  }
+  const est = estimateRouteLocal(originLat, originLng, destLat, destLng);
+  return { duration: est.duration, distance: est.distance, isEstimated: true };
+}
+
+async function resolveCoordsAsync(
+  mapLink: string,
+  name: string
+): Promise<{ lat: number; lng: number } | null> {
+  if (mapLink) {
+    const direct = extractCoordsFromUrl(mapLink);
+    if (direct) return direct;
+
+    const isGoogleMapsLink = /maps\.app\.goo\.gl|goo\.gl\/maps|google\.[^/]+\/maps/i.test(mapLink);
+    if (isGoogleMapsLink) {
+      try {
+        const html = await fetchPageHtml(mapLink.trim());
+        const fromHtml = extractCoordsFromHtml(html);
+        if (fromHtml) return fromHtml;
+      } catch (err) {
+        console.warn('Could not resolve map link via page fetch:', err);
+      }
+    }
+  }
+
+  if (name.trim()) {
+    try {
+      const q = encodeURIComponent(`${name.trim()} camping`);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
+        { headers: { 'Accept-Language': 'de,en,fr' } }
+      );
+      if (res.ok) {
+        const results = await res.json();
+        if (results[0]?.lat && results[0]?.lon) {
+          return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
+        }
+      }
+    } catch (err) {
+      console.warn('OpenStreetMap geocoding failed:', err);
+    }
+  }
+
+  return getHardcodedCoords(name);
+}
+
+interface ScrapeResult {
+  imageUrl: string | null;
+  images: string[];
+}
+
+async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
+  const targetUrl = pageUrl.trim();
+  const html = await fetchPageHtml(targetUrl);
+
+  let imageUrl: string | null = null;
+  const ogMatches = [
+    html.match(/<meta\s+[^>]*property=["']og:image["']\s+[^>]*content=["']([^"']+)["']/i),
+    html.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*property=["']og:image["']/i),
+    html.match(/<meta\s+[^>]*name=["']twitter:image["']\s+[^>]*content=["']([^"']+)["']/i),
+    html.match(/<meta\s+[^>]*content=["']([^"']+)["']\s+[^>]*name=["']twitter:image["']/i),
+  ];
+  for (const match of ogMatches) {
+    if (match?.[1]) {
+      imageUrl = match[1];
+      break;
+    }
+  }
+
+  if (!imageUrl) {
+    const imgMatches = [...html.matchAll(/<img\s+[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp|gif)[^"']*)["']/gi)];
+    for (const m of imgMatches) {
+      const src = m[1];
+      if (!src.includes('logo') && !src.includes('icon') && !src.includes('pixel') && src.length > 10) {
+        imageUrl = src;
+        break;
+      }
+    }
+    if (!imageUrl && imgMatches.length > 0) imageUrl = imgMatches[0][1];
+  }
+
+  let resolvedHeroUrl: string | null = null;
+  if (imageUrl) {
+    try {
+      resolvedHeroUrl = new URL(imageUrl, targetUrl).href;
+    } catch {
+      resolvedHeroUrl = imageUrl.startsWith('http') ? imageUrl : null;
+    }
+  }
+
+  const rawImageUrls: string[] = [];
+  const imgTagRegex = /<img\s+[^>]*(?:src|data-src|data-lazy-src|srcset)=["']([^"'\s>]+)/gi;
+  for (const match of html.matchAll(imgTagRegex)) {
+    if (match[1]) rawImageUrls.push(match[1].split(',')[0].split(' ')[0].trim());
+  }
+  const generalMatches = html.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)/gi);
+  if (generalMatches) rawImageUrls.push(...generalMatches);
+
+  const finalImagesList: string[] = [];
+  const seenBaseKeys = new Set<string>();
+  const skipPattern = /logo|icon|pixel|spacer|avatar|sprite|badge|loader|marker|widget|social|\.svg/i;
+
+  if (resolvedHeroUrl) {
+    seenBaseKeys.add(getImageBaseKey(resolvedHeroUrl));
+    finalImagesList.push(resolvedHeroUrl);
+  }
+
+  for (const rawUrl of rawImageUrls) {
+    if (!rawUrl || rawUrl.length < 10 || skipPattern.test(rawUrl)) continue;
+    try {
+      const resolved = new URL(rawUrl, targetUrl).href;
+      const baseKey = getImageBaseKey(resolved);
+      if (!seenBaseKeys.has(baseKey)) {
+        seenBaseKeys.add(baseKey);
+        finalImagesList.push(resolved);
+      }
+    } catch {
+      if (rawUrl.startsWith('http') && !seenBaseKeys.has(getImageBaseKey(rawUrl))) {
+        seenBaseKeys.add(getImageBaseKey(rawUrl));
+        finalImagesList.push(rawUrl);
+      }
+    }
+  }
+
+  return { imageUrl: resolvedHeroUrl, images: finalImagesList.slice(0, 12) };
 }
 
 // Normalized fuzzy column extractor
@@ -676,9 +867,23 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
     const fetchImages = async () => {
       setIsLoading(true);
       setHasError(false);
-      // /api/scrape-image requires a backend proxy — unavailable on GitHub Pages.
-      // Gallery images fall back to the campsite's direct image URL or generated placeholders.
-      if (active) setIsLoading(false);
+      try {
+        const data = await scrapePageImages(url);
+        if (active) {
+          const list = data.images.length > 0 ? data.images : (data.imageUrl ? [data.imageUrl] : []);
+          setImages(list);
+          if (list.length > 0) {
+            localStorage.setItem(cacheKey, JSON.stringify(list));
+          } else {
+            setHasError(true);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching detail images:', err);
+        if (active) setHasError(true);
+      } finally {
+        if (active) setIsLoading(false);
+      }
     };
 
     fetchImages();
@@ -935,8 +1140,12 @@ export default function App() {
     let active = true;
 
     const fetchTimes = async () => {
-      let updated = false;
-      const nextTimes = { ...drivingTimes };
+      let cachedTimes: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey?: string }> = {};
+      try {
+        cachedTimes = JSON.parse(localStorage.getItem('campground_driving_times_v1') || '{}');
+      } catch { /* ignore */ }
+
+      const updates: Record<string, { duration: string; distance: string; isEstimated: boolean; cacheKey: string }> = {};
 
       for (const camp of campsites) {
         if (!active) break;
@@ -947,27 +1156,21 @@ export default function App() {
         if (lat === null || lng === null) continue;
 
         const cacheKey = `${userCoords.lat.toFixed(4)},${userCoords.lng.toFixed(4)}_to_${lat.toFixed(4)},${lng.toFixed(4)}`;
-        if (nextTimes[camp.id] && nextTimes[camp.id].cacheKey === cacheKey) {
-          continue; // Already computed for these coordinates
-        }
+        if (cachedTimes[camp.id]?.cacheKey === cacheKey) continue;
 
-        // /api/driving-time requires a backend — use local haversine estimate on static hosts.
-        const est = estimateRouteLocal(userCoords.lat, userCoords.lng, lat, lng);
-        nextTimes[camp.id] = {
-          duration: est.duration,
-          distance: est.distance,
-          isEstimated: true,
-          cacheKey
-        };
-        updated = true;
+        const route = await fetchDrivingTime(userCoords.lat, userCoords.lng, lat, lng);
+        updates[camp.id] = { ...route, cacheKey };
 
-        // Throttle to respect servers
-        await new Promise((r) => setTimeout(r, 100));
+        // OSRM public demo: stay under ~1 req/sec
+        await new Promise((r) => setTimeout(r, 1100));
       }
 
-      if (updated && active) {
-        setDrivingTimes(nextTimes);
-        localStorage.setItem('campground_driving_times_v1', JSON.stringify(nextTimes));
+      if (Object.keys(updates).length > 0 && active) {
+        setDrivingTimes((prev) => {
+          const nextTimes = { ...prev, ...updates };
+          localStorage.setItem('campground_driving_times_v1', JSON.stringify(nextTimes));
+          return nextTimes;
+        });
       }
     };
 
@@ -998,26 +1201,29 @@ export default function App() {
         if (!active) break;
         attemptedResolves.current.add(camp.id);
 
-        // /api/resolve-coords requires a backend — resolve from map URL or built-in registry instead.
-        console.log(`[Background Coordinate Resolve] Resolving ${camp.name}...`);
-        const coords = resolveCoordsClient(camp.mapLink || '', camp.name);
-        if (coords) {
-          const index = nextCampsites.findIndex(c => c.id === camp.id);
-          if (index !== -1 && active) {
-            nextCampsites[index] = {
-              ...nextCampsites[index],
-              latitude: coords.lat,
-              longitude: coords.lng
-            };
-            isUpdated = true;
-            console.log(`[Background Coordinate Resolve] Successfully updated ${camp.name}:`, coords.lat, coords.lng);
+        try {
+          console.log(`[Background Coordinate Resolve] Resolving ${camp.name}...`);
+          const coords = await resolveCoordsAsync(camp.mapLink || '', camp.name);
+          if (coords) {
+            const index = nextCampsites.findIndex(c => c.id === camp.id);
+            if (index !== -1 && active) {
+              nextCampsites[index] = {
+                ...nextCampsites[index],
+                latitude: coords.lat,
+                longitude: coords.lng
+              };
+              isUpdated = true;
+              console.log(`[Background Coordinate Resolve] Successfully updated ${camp.name}:`, coords.lat, coords.lng);
+            }
+          } else {
+            console.warn(`[Background Coordinate Resolve] Could not resolve coordinates for ${camp.name}`);
           }
-        } else {
-          console.warn(`[Background Coordinate Resolve] Could not resolve coordinates for ${camp.name}`);
+        } catch (err) {
+          console.error(`[Background Coordinate Resolve] Request error for ${camp.name}:`, err);
         }
 
-        // Small throttle
-        await new Promise((r) => setTimeout(r, 150));
+        // Nominatim usage policy: max 1 request per second
+        await new Promise((r) => setTimeout(r, 1100));
       }
 
       if (isUpdated && active) {
@@ -1056,8 +1262,20 @@ export default function App() {
       // Scrape sequentially to respect host servers and API request bounds
       for (const url of urlsToScrape) {
         if (!active) break;
-        // /api/scrape-image requires a backend proxy — skip on static hosts.
-        console.log(`Skipping webpage image crawl (no backend): ${url}`);
+        try {
+          console.log(`Crawl triggered for webpage image: ${url}`);
+          const data = await scrapePageImages(url);
+          if (data.imageUrl && active) {
+            setScrapedImages(prev => {
+              const updated = { ...prev, [url]: data.imageUrl! };
+              localStorage.setItem('campground_scraped_images', JSON.stringify(updated));
+              return updated;
+            });
+          }
+        } catch (err) {
+          console.error(`Failed crawling webpage image for ${url}:`, err);
+        }
+        await new Promise((r) => setTimeout(r, 300));
       }
     };
 
