@@ -335,6 +335,22 @@ function extractCoordsFromUrl(
   try {
     const decodedUrl = decodeURIComponent(url)
 
+    const placeCoords = decodedUrl.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/i)
+    if (placeCoords?.[1] && placeCoords?.[2]) {
+      const lat = parseFloat(placeCoords[1])
+      const lng = parseFloat(placeCoords[2])
+      if (
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180
+      ) {
+        return { lat, lng }
+      }
+    }
+
     const patterns = [
       /[@/](-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
       /query=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
@@ -342,6 +358,7 @@ function extractCoordsFromUrl(
       /place\/[^/]+\/([-?\d.]+),([-?\d.]+)/,
       /place\/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/,
       /ll=(-?\d+\.\d+),(-?\d+\.\d+)/,
+      /center=(-?\d+\.\d+)[,%2C]+(-?\d+\.\d+)/i,
     ]
 
     for (const regex of patterns) {
@@ -644,6 +661,25 @@ function getCampDurationMinutes(
   return parseDurationToMinutes(info.duration)
 }
 
+async function resolveCoordsFromMapLinkOnly(
+  mapLink: string
+): Promise<{ lat: number; lng: number } | null> {
+  const direct = extractCoordsFromUrl(mapLink)
+  if (direct) return direct
+
+  const isGoogleMapsLink =
+    /maps\.app\.goo\.gl|goo\.gl\/maps|google\.[^/]+\/maps/i.test(mapLink)
+  if (!isGoogleMapsLink) return null
+
+  try {
+    const html = await fetchPageHtml(mapLink.trim())
+    return extractCoordsFromHtml(html)
+  } catch (err) {
+    console.warn("Could not resolve map link coords:", err)
+    return null
+  }
+}
+
 async function resolveCoordsAsync(
   mapLink: string,
   name: string
@@ -863,14 +899,22 @@ function getCampMapLink(camp: NormalizedCampsite): string {
   return mapKey && camp.raw[mapKey]?.trim() ? camp.raw[mapKey].trim() : ""
 }
 
-function getCampCoords(
-  camp: NormalizedCampsite
+function getMeteoblueCoords(
+  camp: NormalizedCampsite,
+  mapLinkCoordsCache: Record<string, { lat: number; lng: number }>
 ): { lat: number; lng: number } | null {
+  const mapLink = getCampMapLink(camp)
+  if (mapLink) {
+    const fromLink = extractCoordsFromUrl(mapLink)
+    if (fromLink) return fromLink
+    if (mapLinkCoordsCache[camp.id]) return mapLinkCoordsCache[camp.id]
+    return null
+  }
+
   if (camp.latitude !== null && camp.longitude !== null) {
     return { lat: camp.latitude, lng: camp.longitude }
   }
-  const mapLink = getCampMapLink(camp)
-  if (mapLink) return extractCoordsFromUrl(mapLink)
+
   return null
 }
 
@@ -893,8 +937,11 @@ function getCampTown(camp: NormalizedCampsite): string {
   return camp.state && camp.state !== "N/A" ? camp.state.trim() : ""
 }
 
-function buildMeteoblueUrlForCamp(camp: NormalizedCampsite): string | null {
-  const coords = getCampCoords(camp)
+function buildMeteoblueUrlForCamp(
+  camp: NormalizedCampsite,
+  mapLinkCoordsCache: Record<string, { lat: number; lng: number }>
+): string | null {
+  const coords = getMeteoblueCoords(camp, mapLinkCoordsCache)
   if (coords) return buildMeteoblueUrlFromCoords(coords.lat, coords.lng)
   const town = getCampTown(camp)
   if (town) return buildMeteoblueUrl(town)
@@ -1704,6 +1751,57 @@ export default function App() {
 
   // Keep track of resolved coordinate attempts to prevent infinite request loops
   const attemptedResolves = useRef<Set<string>>(new Set())
+  const attemptedMapLinkCoords = useRef<Set<string>>(new Set())
+
+  const [mapLinkCoordsCache, setMapLinkCoordsCache] = useState<
+    Record<string, { lat: number; lng: number }>
+  >({})
+
+  // Resolve coordinates from each camp's Google Maps link for MeteoBlue
+  useEffect(() => {
+    const needsMapCoords = campsites.filter((c) => {
+      const mapLink = getCampMapLink(c)
+      if (!mapLink || extractCoordsFromUrl(mapLink) || mapLinkCoordsCache[c.id]) {
+        return false
+      }
+      return !attemptedMapLinkCoords.current.has(c.id)
+    })
+    if (needsMapCoords.length === 0) return
+
+    let active = true
+
+    const resolveAll = async () => {
+      const updates: Record<string, { lat: number; lng: number }> = {}
+
+      for (const camp of needsMapCoords) {
+        if (!active) break
+        attemptedMapLinkCoords.current.add(camp.id)
+        const mapLink = getCampMapLink(camp)
+
+        try {
+          const coords = await resolveCoordsFromMapLinkOnly(mapLink)
+          if (coords) updates[camp.id] = coords
+        } catch (err) {
+          console.warn(
+            `[Map Link Coords] Could not resolve coords for ${camp.name}:`,
+            err
+          )
+        }
+
+        await new Promise((r) => setTimeout(r, 1100))
+      }
+
+      if (active && Object.keys(updates).length > 0) {
+        setMapLinkCoordsCache((prev) => ({ ...prev, ...updates }))
+      }
+    }
+
+    resolveAll()
+
+    return () => {
+      active = false
+    }
+  }, [campsites])
 
   // Dynamically resolve missing coordinates from mapLink or name
   useEffect(() => {
@@ -2331,12 +2429,15 @@ export default function App() {
                             )
                           }) || "URL"
                         const urlVal = camp.raw[urlKey]
-                        const meteoblueUrl = buildMeteoblueUrlForCamp(camp)
+                        const meteoblueUrl = buildMeteoblueUrlForCamp(
+                          camp,
+                          mapLinkCoordsCache
+                        )
                         const meteoPending =
                           !meteoblueUrl &&
                           !!getCampMapLink(camp) &&
-                          !getCampCoords(camp) &&
-                          (camp.latitude === null || camp.longitude === null)
+                          !getMeteoblueCoords(camp, mapLinkCoordsCache) &&
+                          !attemptedMapLinkCoords.current.has(camp.id)
 
                         return (
                           <>
