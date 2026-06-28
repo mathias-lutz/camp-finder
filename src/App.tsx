@@ -834,144 +834,15 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
   }
 }
 
+function buildMeteoblueUrlFromCoords(lat: number, lng: number): string {
+  const latPart = `${Math.abs(lat).toFixed(4)}${lat >= 0 ? "N" : "S"}`
+  const lngPart = `${Math.abs(lng).toFixed(4)}${lng >= 0 ? "E" : "W"}`
+  return `https://www.meteoblue.com/de/wetter/woche/${latPart}${lngPart}`
+}
+
 function buildMeteoblueUrl(town: string): string {
   const slug = town.trim().replace(/\s+/g, "_")
   return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(slug)}`
-}
-
-const COUNTRY_NAME_PATTERN =
-  /^(france|deutschland|germany|schweiz|switzerland|italien|italy|spain|españa|espagne|austria|österreich|belgium|belgien|luxembourg|luxemburg|nederland|netherlands|portugal|poland|polen|croatia|kroatien|slovenia|slowenien)$/i
-
-function pickTownFromPlaceLabel(label: string): string | null {
-  const cleaned = label.replace(/\s*[-–·|]\s*Google\s*Maps.*$/i, "").trim()
-  if (!cleaned) return null
-
-  const postalTown = cleaned.match(/\b\d{4,5}\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'-]+)/)
-  if (postalTown?.[1]) return postalTown[1].trim()
-
-  const parts = cleaned
-    .split(/[,;]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  if (parts.length >= 2) {
-    let candidate = parts[parts.length - 1]
-    if (COUNTRY_NAME_PATTERN.test(candidate))
-      candidate = parts[parts.length - 2]
-    if (candidate && !/camping|campground|aire/i.test(candidate))
-      return candidate
-    const second = parts[1]
-    if (second && !/camping|campground|aire/i.test(second)) return second
-  }
-
-  if (/camping|campground|aire\s+de\s+camping/i.test(cleaned)) return null
-  return cleaned
-}
-
-function extractPlaceNameFromMapUrl(url: string): string | null {
-  if (!url) return null
-  try {
-    const decoded = decodeURIComponent(url)
-
-    const placeMatch = decoded.match(/\/place\/([^/@?]+)/i)
-    if (placeMatch?.[1]) {
-      const raw = placeMatch[1].replace(/\+/g, " ").trim()
-      return pickTownFromPlaceLabel(raw)
-    }
-
-    for (const param of ["query", "q"]) {
-      const match = decoded.match(new RegExp(`[?&]${param}=([^&]+)`, "i"))
-      if (match?.[1]) {
-        const val = decodeURIComponent(match[1].replace(/\+/g, " ")).trim()
-        if (!/^-?\d+\.?\d*\s*,\s*-?\d+\.?\d*$/.test(val)) {
-          return pickTownFromPlaceLabel(val)
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return null
-}
-
-function extractPlaceNameFromHtml(html: string): string | null {
-  const ogTitle =
-    html.match(/property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
-    html.match(/content=["']([^"']+)["']\s+property=["']og:title["']/i)
-  if (ogTitle?.[1])
-    return pickTownFromPlaceLabel(decodeHtmlEntities(ogTitle[1]))
-
-  const titleMatch = html.match(/<title>([^<]+)<\/title>/i)
-  if (titleMatch?.[1])
-    return pickTownFromPlaceLabel(decodeHtmlEntities(titleMatch[1]))
-
-  return null
-}
-
-async function reverseGeocodeTown(
-  lat: number,
-  lng: number
-): Promise<string | null> {
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=12&addressdetails=1`,
-    { headers: { "Accept-Language": "de,en,fr" } }
-  )
-  if (!res.ok) return null
-  const data = await res.json()
-  const address = data?.address
-  if (!address) return null
-  return (
-    address.city ||
-    address.town ||
-    address.village ||
-    address.municipality ||
-    address.hamlet ||
-    address.county ||
-    null
-  )
-}
-
-async function resolveTownAsync(
-  mapLink: string,
-  lat: number | null,
-  lng: number | null
-): Promise<string | null> {
-  if (mapLink) {
-    const fromUrl = extractPlaceNameFromMapUrl(mapLink)
-    if (fromUrl) return fromUrl
-
-    const coordsFromUrl = extractCoordsFromUrl(mapLink)
-    if (coordsFromUrl) {
-      lat = lat ?? coordsFromUrl.lat
-      lng = lng ?? coordsFromUrl.lng
-    }
-
-    const isGoogleMapsLink =
-      /maps\.app\.goo\.gl|goo\.gl\/maps|google\.[^/]+\/maps/i.test(mapLink)
-    if (isGoogleMapsLink) {
-      try {
-        const html = await fetchPageHtml(mapLink.trim())
-        const fromHtml = extractPlaceNameFromHtml(html)
-        if (fromHtml) return fromHtml
-        const coordsFromHtml = extractCoordsFromHtml(html)
-        if (coordsFromHtml) {
-          lat = lat ?? coordsFromHtml.lat
-          lng = lng ?? coordsFromHtml.lng
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  if (lat !== null && lng !== null) {
-    try {
-      return await reverseGeocodeTown(lat, lng)
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return null
 }
 
 function getCampMapLink(camp: NormalizedCampsite): string {
@@ -992,7 +863,18 @@ function getCampMapLink(camp: NormalizedCampsite): string {
   return mapKey && camp.raw[mapKey]?.trim() ? camp.raw[mapKey].trim() : ""
 }
 
-function getCampTown(camp: NormalizedCampsite, resolvedTown?: string): string {
+function getCampCoords(
+  camp: NormalizedCampsite
+): { lat: number; lng: number } | null {
+  if (camp.latitude !== null && camp.longitude !== null) {
+    return { lat: camp.latitude, lng: camp.longitude }
+  }
+  const mapLink = getCampMapLink(camp)
+  if (mapLink) return extractCoordsFromUrl(mapLink)
+  return null
+}
+
+function getCampTown(camp: NormalizedCampsite): string {
   if (camp.town?.trim()) return camp.town.trim()
   const townKey = Object.keys(camp.raw).find((k) => {
     const l = k.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -1008,13 +890,15 @@ function getCampTown(camp: NormalizedCampsite, resolvedTown?: string): string {
     ].some((kw) => l.includes(kw))
   })
   if (townKey && camp.raw[townKey]?.trim()) return camp.raw[townKey].trim()
-  if (resolvedTown?.trim()) return resolvedTown.trim()
-  const mapLink = getCampMapLink(camp)
-  if (mapLink) {
-    const fromMap = extractPlaceNameFromMapUrl(mapLink)
-    if (fromMap) return fromMap
-  }
   return camp.state && camp.state !== "N/A" ? camp.state.trim() : ""
+}
+
+function buildMeteoblueUrlForCamp(camp: NormalizedCampsite): string | null {
+  const coords = getCampCoords(camp)
+  if (coords) return buildMeteoblueUrlFromCoords(coords.lat, coords.lng)
+  const town = getCampTown(camp)
+  if (town) return buildMeteoblueUrl(town)
+  return null
 }
 
 // Normalized fuzzy column extractor
@@ -1820,88 +1704,6 @@ export default function App() {
 
   // Keep track of resolved coordinate attempts to prevent infinite request loops
   const attemptedResolves = useRef<Set<string>>(new Set())
-  const attemptedTownResolves = useRef<Set<string>>(new Set())
-
-  const [townCache, setTownCache] = useState<Record<string, string>>(() => {
-    try {
-      const saved = localStorage.getItem("campground_town_cache")
-      return saved ? JSON.parse(saved) : {}
-    } catch {
-      return {}
-    }
-  })
-  const [resolvingTownIds, setResolvingTownIds] = useState<
-    Record<string, boolean>
-  >({})
-
-  // Resolve town names from map links / coordinates for MeteoBlue
-  useEffect(() => {
-    const needsTown = campsites.filter((c) => {
-      if (getCampTown(c) || townCache[c.id]) return false
-      if (attemptedTownResolves.current.has(c.id)) return false
-      return !!(
-        getCampMapLink(c) ||
-        (c.latitude !== null && c.longitude !== null)
-      )
-    })
-    if (needsTown.length === 0) return
-
-    let active = true
-    setResolvingTownIds((prev) => {
-      const next = { ...prev }
-      for (const camp of needsTown) next[camp.id] = true
-      return next
-    })
-
-    const resolveTowns = async () => {
-      const updates: Record<string, string> = {}
-
-      for (const camp of needsTown) {
-        if (!active) break
-        attemptedTownResolves.current.add(camp.id)
-
-        const mapLink = getCampMapLink(camp)
-
-        try {
-          const town = await resolveTownAsync(
-            mapLink,
-            camp.latitude,
-            camp.longitude
-          )
-          if (town) updates[camp.id] = town
-        } catch (err) {
-          console.warn(
-            `[Town Resolve] Could not resolve town for ${camp.name}:`,
-            err
-          )
-        }
-
-        if (active) {
-          setResolvingTownIds((prev) => {
-            const next = { ...prev }
-            delete next[camp.id]
-            return next
-          })
-        }
-
-        await new Promise((r) => setTimeout(r, 1100))
-      }
-
-      if (active && Object.keys(updates).length > 0) {
-        setTownCache((prev) => {
-          const next = { ...prev, ...updates }
-          localStorage.setItem("campground_town_cache", JSON.stringify(next))
-          return next
-        })
-      }
-    }
-
-    resolveTowns()
-
-    return () => {
-      active = false
-    }
-  }, [campsites])
 
   // Dynamically resolve missing coordinates from mapLink or name
   useEffect(() => {
@@ -2529,19 +2331,12 @@ export default function App() {
                             )
                           }) || "URL"
                         const urlVal = camp.raw[urlKey]
-                        const townVal = getCampTown(camp, townCache[camp.id])
-                        const canResolveTown = !!(
-                          mapVal ||
-                          getCampMapLink(camp) ||
-                          (camp.latitude !== null && camp.longitude !== null)
-                        )
-                        const townPending =
-                          !townVal &&
-                          canResolveTown &&
-                          !!resolvingTownIds[camp.id]
-                        const meteoblueUrl = townVal
-                          ? buildMeteoblueUrl(townVal)
-                          : null
+                        const meteoblueUrl = buildMeteoblueUrlForCamp(camp)
+                        const meteoPending =
+                          !meteoblueUrl &&
+                          !!getCampMapLink(camp) &&
+                          !getCampCoords(camp) &&
+                          (camp.latitude === null || camp.longitude === null)
 
                         return (
                           <>
@@ -2584,7 +2379,7 @@ export default function App() {
                                     <span>Meteo</span>
                                   </span>
                                 </a>
-                              ) : townPending ? (
+                              ) : meteoPending ? (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">
                                     Wetter wird geladen...
@@ -2593,7 +2388,7 @@ export default function App() {
                               ) : (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">
-                                    Kein Ort hinterlegt
+                                    Keine Koordinaten
                                   </span>
                                 </div>
                               )}
