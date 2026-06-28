@@ -838,6 +838,104 @@ function countryToMeteoblueSlug(country: string): string | null {
   return METEOBLUE_COUNTRY_SLUGS[ascii] ?? null
 }
 
+const COUNTRY_TO_ISO2: Record<string, string> = {
+  france: "FR",
+  frankreich: "FR",
+  fr: "FR",
+  germany: "DE",
+  deutschland: "DE",
+  de: "DE",
+  switzerland: "CH",
+  schweiz: "CH",
+  ch: "CH",
+  italy: "IT",
+  italien: "IT",
+  it: "IT",
+  spain: "ES",
+  spanien: "ES",
+  espana: "ES",
+  es: "ES",
+  austria: "AT",
+  oesterreich: "AT",
+  österreich: "AT",
+  at: "AT",
+  netherlands: "NL",
+  niederlande: "NL",
+  nl: "NL",
+  belgium: "BE",
+  belgien: "BE",
+  be: "BE",
+  portugal: "PT",
+  pt: "PT",
+  croatia: "HR",
+  kroatien: "HR",
+  hr: "HR",
+  slovenia: "SI",
+  slowenien: "SI",
+  si: "SI",
+  luxembourg: "LU",
+  luxemburg: "LU",
+  lu: "LU",
+  poland: "PL",
+  polen: "PL",
+  pl: "PL",
+  "czech republic": "CZ",
+  czechia: "CZ",
+  tschechien: "CZ",
+  cz: "CZ",
+  denmark: "DK",
+  daenemark: "DK",
+  dk: "DK",
+  sweden: "SE",
+  schweden: "SE",
+  se: "SE",
+  norway: "NO",
+  norwegen: "NO",
+  no: "NO",
+  "united kingdom": "GB",
+  "great britain": "GB",
+  grossbritannien: "GB",
+  uk: "GB",
+  gb: "GB",
+  england: "GB",
+  ireland: "IE",
+  irland: "IE",
+  ie: "IE",
+  greece: "GR",
+  griechenland: "GR",
+  gr: "GR",
+  hungary: "HU",
+  ungarn: "HU",
+  hu: "HU",
+  romania: "RO",
+  rumaenien: "RO",
+  ro: "RO",
+  slovakia: "SK",
+  slowakei: "SK",
+  sk: "SK",
+}
+
+function countryToIso2(country: string): string | null {
+  const key = country.trim().toLowerCase()
+  if (COUNTRY_TO_ISO2[key]) return COUNTRY_TO_ISO2[key]
+  const ascii = key.normalize("NFD").replace(/\p{M}/gu, "")
+  return COUNTRY_TO_ISO2[ascii] ?? null
+}
+
+function inferIso2FromPinCampUrl(url: string): string | null {
+  try {
+    const host = new URL(url.trim()).hostname.toLowerCase()
+    if (host.endsWith(".pincamp.fr")) return "FR"
+    if (host.endsWith(".pincamp.de")) return "DE"
+    if (host.endsWith(".pincamp.ch")) return "CH"
+    if (host.endsWith(".pincamp.it")) return "IT"
+    if (host.includes("anwbcamping.nl")) return "NL"
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 function inferCountrySlugFromPinCampUrl(url: string): string | null {
   try {
     const host = new URL(url.trim()).hostname.toLowerCase()
@@ -1242,10 +1340,87 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
   }
 }
 
-function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
-  const slug = place.trim().replace(/\s+/g, "_")
-  const fullSlug = countrySlug ? `${slug}_${countrySlug}` : slug
-  return `https://meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
+function buildMeteoblueUrlFromSlug(locationSlug: string): string {
+  return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(locationSlug)}`
+}
+
+interface MeteoblueSearchResult {
+  name: string
+  url: string
+  lat: number
+  lon: number
+  distance?: number
+}
+
+function distanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function pickBestMeteoblueResult(
+  results: MeteoblueSearchResult[],
+  refLat?: number | null,
+  refLng?: number | null
+): MeteoblueSearchResult | null {
+  if (results.length === 0) return null
+  if (refLat == null || refLng == null) return results[0]
+
+  let best = results[0]
+  let bestDistance = distanceKm(refLat, refLng, best.lat, best.lon)
+  for (const result of results.slice(1)) {
+    const nextDistance = distanceKm(refLat, refLng, result.lat, result.lon)
+    if (nextDistance < bestDistance) {
+      best = result
+      bestDistance = nextDistance
+    }
+  }
+  return best
+}
+
+async function fetchMeteoblueSearchResults(
+  query: string,
+  iso2: string
+): Promise<MeteoblueSearchResult[]> {
+  const searchUrl = `https://www.meteoblue.com/de/server/search/query3?query=${encodeURIComponent(query)}&iso2=${encodeURIComponent(iso2)}`
+  const res = await fetch(searchUrl)
+  if (!res.ok) return []
+
+  const data = (await res.json()) as {
+    results?: MeteoblueSearchResult[]
+  }
+  return Array.isArray(data.results) ? data.results : []
+}
+
+async function resolveMeteoblueLocationSlug(
+  place: string,
+  iso2: string,
+  refLat?: number | null,
+  refLng?: number | null
+): Promise<string | null> {
+  const nameResults = await fetchMeteoblueSearchResults(place, iso2)
+  const fromName = pickBestMeteoblueResult(nameResults, refLat, refLng)
+  if (fromName?.url) return fromName.url
+
+  if (refLat != null && refLng != null) {
+    const coordResults = await fetchMeteoblueSearchResults(
+      `${refLat},${refLng}`,
+      iso2
+    )
+    const fromCoords = pickBestMeteoblueResult(coordResults, refLat, refLng)
+    if (fromCoords?.url) return fromCoords.url
+  }
+
+  return null
 }
 
 function normalizePinCampUrl(url: string): string {
@@ -1313,23 +1488,60 @@ function getPinCampLocationForCamp(
   return fromUrl ?? fromCampId ?? null
 }
 
-function getMeteoblueCountrySlug(
+function getMeteoblueIso2(
   camp: NormalizedCampsite,
   pinCampLocations: Record<string, PinCampLocation>
 ): string | null {
   const fromPinCamp = getPinCampLocationForCamp(camp, pinCampLocations)
   if (fromPinCamp?.country) {
-    const slug = countryToMeteoblueSlug(fromPinCamp.country)
-    if (slug) return slug
+    const iso2 = countryToIso2(fromPinCamp.country)
+    if (iso2) return iso2
   }
 
   const pinUrl = getCampPinCampUrl(camp)
   if (pinUrl) {
-    const fromUrl = inferCountrySlugFromPinCampUrl(pinUrl)
+    const fromUrl = inferIso2FromPinCampUrl(pinUrl)
     if (fromUrl) return fromUrl
   }
 
   return null
+}
+
+function meteoblueResolveKey(
+  camp: NormalizedCampsite,
+  place: string,
+  iso2: string
+): string {
+  const pinUrl = getCampPinCampUrl(camp)
+  return pinUrl
+    ? normalizePinCampUrl(pinUrl)
+    : `${camp.id}:${place.toLowerCase()}:${iso2}`
+}
+
+function isValidMeteoblueLocationSlug(slug: string): boolean {
+  return /_\d+$/.test(slug.trim())
+}
+
+function getMeteoblueSlugForCamp(
+  camp: NormalizedCampsite,
+  slugCache: Record<string, string>
+): string | null {
+  const fromCampId = slugCache[camp.id]
+  if (fromCampId && isValidMeteoblueLocationSlug(fromCampId)) return fromCampId
+
+  const pinUrl = getCampPinCampUrl(camp)
+  if (!pinUrl) return null
+
+  const fromUrl = slugCache[pinCampUrlCacheKey(pinUrl)]
+  return fromUrl && isValidMeteoblueLocationSlug(fromUrl) ? fromUrl : null
+}
+
+function buildMeteoblueUrlForCamp(
+  camp: NormalizedCampsite,
+  slugCache: Record<string, string>
+): string | null {
+  const slug = getMeteoblueSlugForCamp(camp, slugCache)
+  return slug ? buildMeteoblueUrlFromSlug(slug) : null
 }
 
 function getCampMapLink(camp: NormalizedCampsite): string {
@@ -1380,17 +1592,6 @@ function getCampPinCampUrl(camp: NormalizedCampsite): string {
   })
   const url = urlKey ? camp.raw[urlKey]?.trim() : ""
   return url && isPinCampUrl(url) ? url : ""
-}
-
-function buildMeteoblueUrlForCamp(
-  camp: NormalizedCampsite,
-  pinCampLocations: Record<string, PinCampLocation>
-): string | null {
-  const place = getMeteobluePlaceName(camp, pinCampLocations)
-  if (!place) return null
-
-  const countrySlug = getMeteoblueCountrySlug(camp, pinCampLocations)
-  return buildMeteoblueUrl(place, countrySlug)
 }
 
 // Normalized fuzzy column extractor
@@ -2205,7 +2406,9 @@ export default function App() {
   // Keep track of resolved coordinate attempts to prevent infinite request loops
   const attemptedResolves = useRef<Set<string>>(new Set())
   const attemptedPinCampLocations = useRef<Set<string>>(new Set())
+  const attemptedMeteoblueSlugs = useRef<Set<string>>(new Set())
   const pinCampLocationCacheRef = useRef<Record<string, PinCampLocation>>({})
+  const meteoblueSlugCacheRef = useRef<Record<string, string>>({})
 
   const [pinCampLocationCache, setPinCampLocationCache] = useState<
     Record<string, PinCampLocation>
@@ -2229,6 +2432,19 @@ export default function App() {
   })
 
   pinCampLocationCacheRef.current = pinCampLocationCache
+
+  const [meteoblueSlugCache, setMeteoblueSlugCache] = useState<
+    Record<string, string>
+  >(() => {
+    try {
+      const saved = localStorage.getItem("campground_meteoblue_slugs_v1")
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  meteoblueSlugCacheRef.current = meteoblueSlugCache
 
   // Fetch town from each Pin Camp page for MeteoBlue links
   useEffect(() => {
@@ -2293,6 +2509,86 @@ export default function App() {
       active = false
     }
   }, [campsites])
+
+  // Resolve MeteoBlue canonical location slugs (with numeric ID) via their search API
+  useEffect(() => {
+    const needsSlug = campsites.filter((c) => {
+      const pinUrl = getCampPinCampUrl(c)
+      if (!pinUrl) return false
+      if (getMeteoblueSlugForCamp(c, meteoblueSlugCacheRef.current)) return false
+
+      const place = getMeteobluePlaceName(c, pinCampLocationCacheRef.current)
+      const iso2 = getMeteoblueIso2(c, pinCampLocationCacheRef.current)
+      if (!place || !iso2) return false
+
+      const key = meteoblueResolveKey(c, place, iso2)
+      if (attemptedMeteoblueSlugs.current.has(key)) return false
+      return true
+    })
+    if (needsSlug.length === 0) return
+
+    let active = true
+
+    const resolveSlugs = async () => {
+      const updates: Record<string, string> = {}
+
+      for (const camp of needsSlug) {
+        if (!active) break
+
+        const pinUrl = getCampPinCampUrl(camp)
+        if (!pinUrl) continue
+
+        const place = getMeteobluePlaceName(camp, pinCampLocationCacheRef.current)
+        const iso2 = getMeteoblueIso2(camp, pinCampLocationCacheRef.current)
+        if (!place || !iso2) continue
+
+        const key = meteoblueResolveKey(camp, place, iso2)
+        attemptedMeteoblueSlugs.current.add(key)
+
+        const fromPinCamp = getPinCampLocationForCamp(
+          camp,
+          pinCampLocationCacheRef.current
+        )
+
+        try {
+          const slug = await resolveMeteoblueLocationSlug(
+            place,
+            iso2,
+            fromPinCamp?.lat,
+            fromPinCamp?.lng
+          )
+          if (slug) {
+            updates[camp.id] = slug
+            updates[pinCampUrlCacheKey(pinUrl)] = slug
+          }
+        } catch (err) {
+          console.warn(
+            `[MeteoBlue Slug] Could not resolve location for ${camp.name}:`,
+            err
+          )
+        }
+
+        await new Promise((r) => setTimeout(r, 300))
+      }
+
+      if (active && Object.keys(updates).length > 0) {
+        setMeteoblueSlugCache((prev) => {
+          const next = { ...prev, ...updates }
+          localStorage.setItem(
+            "campground_meteoblue_slugs_v1",
+            JSON.stringify(next)
+          )
+          return next
+        })
+      }
+    }
+
+    resolveSlugs()
+
+    return () => {
+      active = false
+    }
+  }, [campsites, pinCampLocationCache])
 
   // Dynamically resolve missing coordinates from mapLink or name
   useEffect(() => {
@@ -2922,16 +3218,37 @@ export default function App() {
                         const urlVal = camp.raw[urlKey]
                         const meteoblueUrl = buildMeteoblueUrlForCamp(
                           camp,
-                          pinCampLocationCache
+                          meteoblueSlugCache
                         )
                         const pinCampUrl = getCampPinCampUrl(camp)
+                        const hasPlace = hasPinCampMeteoPlace(
+                          camp,
+                          pinCampLocationCache
+                        )
+                        const resolveKey =
+                          hasPlace && pinCampUrl
+                            ? meteoblueResolveKey(
+                                camp,
+                                getMeteobluePlaceName(
+                                  camp,
+                                  pinCampLocationCache
+                                ),
+                                getMeteoblueIso2(
+                                  camp,
+                                  pinCampLocationCache
+                                ) ?? ""
+                              )
+                            : ""
                         const meteoPending =
                           !meteoblueUrl &&
                           !!pinCampUrl &&
-                          !hasPinCampMeteoPlace(camp, pinCampLocationCache) &&
-                          !attemptedPinCampLocations.current.has(
-                            normalizePinCampUrl(pinCampUrl)
-                          )
+                          ((!hasPlace &&
+                            !attemptedPinCampLocations.current.has(
+                              normalizePinCampUrl(pinCampUrl)
+                            )) ||
+                            (hasPlace &&
+                              !!resolveKey &&
+                              !attemptedMeteoblueSlugs.current.has(resolveKey)))
 
                         return (
                           <>
