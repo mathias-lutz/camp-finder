@@ -1246,12 +1246,6 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
   }
 }
 
-function buildMeteoblueUrlFromCoords(lat: number, lng: number): string {
-  const latPart = `${Math.abs(lat).toFixed(4)}${lat >= 0 ? "N" : "S"}`
-  const lngPart = `${Math.abs(lng).toFixed(4)}${lng >= 0 ? "E" : "W"}`
-  return `https://www.meteoblue.com/de/wetter/woche/${latPart}${lngPart}`
-}
-
 function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
   const slug = place.trim().replace(/\s+/g, "_")
   const fullSlug = countrySlug ? `${slug}_${countrySlug}` : slug
@@ -1279,10 +1273,27 @@ function readGalleryLocationCache(pinUrl: string): PinCampLocation | null {
     if (!saved) return null
     const parsed = JSON.parse(saved)
     const location = parsed?.location as PinCampLocation | undefined
-    return location?.town ? location : null
+    return location?.town || location?.region ? location : null
   } catch {
     return null
   }
+}
+
+function getMeteobluePlaceName(
+  camp: NormalizedCampsite,
+  pinCampLocations: Record<string, PinCampLocation>
+): string {
+  const fromPinCamp = getPinCampLocationForCamp(camp, pinCampLocations)
+  if (fromPinCamp?.town?.trim()) return fromPinCamp.town.trim()
+  if (fromPinCamp?.region?.trim()) return fromPinCamp.region.trim()
+  return ""
+}
+
+function hasPinCampMeteoPlace(
+  camp: NormalizedCampsite,
+  pinCampLocations: Record<string, PinCampLocation>
+): boolean {
+  return getMeteobluePlaceName(camp, pinCampLocations).length > 0
 }
 
 function getPinCampLocationForCamp(
@@ -1290,16 +1301,16 @@ function getPinCampLocationForCamp(
   pinCampLocations: Record<string, PinCampLocation>
 ): PinCampLocation | null {
   const fromCampId = pinCampLocations[camp.id]
-  if (fromCampId?.town) return fromCampId
+  if (fromCampId?.town || fromCampId?.region) return fromCampId
 
   const pinUrl = getCampPinCampUrl(camp)
   if (!pinUrl) return fromCampId ?? null
 
   const fromUrl = pinCampLocations[pinCampUrlCacheKey(pinUrl)]
-  if (fromUrl?.town) return fromUrl
+  if (fromUrl?.town || fromUrl?.region) return fromUrl
 
   const fromGallery = readGalleryLocationCache(pinUrl)
-  if (fromGallery?.town) return fromGallery
+  if (fromGallery?.town || fromGallery?.region) return fromGallery
 
   return fromUrl ?? fromCampId ?? null
 }
@@ -1377,20 +1388,11 @@ function buildMeteoblueUrlForCamp(
   camp: NormalizedCampsite,
   pinCampLocations: Record<string, PinCampLocation>
 ): string | null {
-  const fromPinCamp = getPinCampLocationForCamp(camp, pinCampLocations)
-  const place = fromPinCamp?.town?.trim() ?? ""
+  const place = getMeteobluePlaceName(camp, pinCampLocations)
+  if (!place) return null
+
   const countrySlug = getMeteoblueCountrySlug(camp, pinCampLocations)
-  if (place) return buildMeteoblueUrl(place, countrySlug)
-
-  if (fromPinCamp?.lat != null && fromPinCamp?.lng != null) {
-    return buildMeteoblueUrlFromCoords(fromPinCamp.lat, fromPinCamp.lng)
-  }
-
-  if (camp.latitude != null && camp.longitude != null) {
-    return buildMeteoblueUrlFromCoords(camp.latitude, camp.longitude)
-  }
-
-  return null
+  return buildMeteoblueUrl(place, countrySlug)
 }
 
 // Normalized fuzzy column extractor
@@ -1687,9 +1689,13 @@ function getImageBaseKey(urlStr: string): string {
 
 interface CampgroundDetailImagesProps {
   url: string
+  onLocationFound?: (location: PinCampLocation) => void
 }
 
-function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
+function CampgroundDetailImages({
+  url,
+  onLocationFound,
+}: CampgroundDetailImagesProps) {
   const [images, setImages] = useState<string[]>([])
   const [infoParagraph, setInfoParagraph] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -1745,6 +1751,12 @@ function CampgroundDetailImages({ url }: CampgroundDetailImagesProps) {
                 location: data.location,
               })
             )
+            if (
+              data.location &&
+              (data.location.town || data.location.region)
+            ) {
+              onLocationFound?.(data.location)
+            }
           } else {
             setHasError(true)
           }
@@ -2213,7 +2225,7 @@ export default function App() {
       const parsed = JSON.parse(legacy) as Record<string, PinCampLocation>
       const migrated: Record<string, PinCampLocation> = {}
       for (const [key, value] of Object.entries(parsed)) {
-        if (value?.town) migrated[key] = value
+        if (value?.town || value?.region) migrated[key] = value
       }
       return migrated
     } catch {
@@ -2229,7 +2241,7 @@ export default function App() {
       const pinUrl = getCampPinCampUrl(c)
       if (!pinUrl) return false
       if (
-        getPinCampLocationForCamp(c, pinCampLocationCacheRef.current)?.town
+        hasPinCampMeteoPlace(c, pinCampLocationCacheRef.current)
       ) {
         return false
       }
@@ -2255,7 +2267,7 @@ export default function App() {
 
         try {
           const data = await scrapePageImages(pinUrl)
-          if (data.location?.town) {
+          if (data.location?.town || data.location?.region) {
             updates[camp.id] = data.location
             updates[pinCampUrlCacheKey(pinUrl)] = data.location
           }
@@ -2923,8 +2935,7 @@ export default function App() {
                         const meteoPending =
                           !meteoblueUrl &&
                           !!pinCampUrl &&
-                          !getPinCampLocationForCamp(camp, pinCampLocationCache)
-                            ?.town &&
+                          !hasPinCampMeteoPlace(camp, pinCampLocationCache) &&
                           !attemptedPinCampLocations.current.has(
                             normalizePinCampUrl(pinCampUrl)
                           )
@@ -3009,7 +3020,23 @@ export default function App() {
                                 </div>
                               )}
                             </div>
-                            <CampgroundDetailImages url={urlVal} />
+                            <CampgroundDetailImages
+                              url={urlVal}
+                              onLocationFound={(location) => {
+                                setPinCampLocationCache((prev) => {
+                                  const next = {
+                                    ...prev,
+                                    [camp.id]: location,
+                                    [pinCampUrlCacheKey(urlVal)]: location,
+                                  }
+                                  localStorage.setItem(
+                                    "campground_pincamp_locations_v3",
+                                    JSON.stringify(next)
+                                  )
+                                  return next
+                                })
+                              }}
+                            />
                           </>
                         )
                       })()}
