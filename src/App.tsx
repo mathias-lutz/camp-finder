@@ -2382,7 +2382,7 @@ export default function App() {
                               ) : meteoPending ? (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">
-                                    Wetter wird geladen...
+                                    Ort laden...
                                   </span>
                                 </div>
                               ) : (
