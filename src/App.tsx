@@ -499,17 +499,31 @@ async function fetchPageHtml(url: string): Promise<string> {
   try {
     const direct = await fetch(url, { signal: controller.signal })
     clearTimeout(timeoutId)
-    if (direct.ok) return direct.text()
+    if (direct.ok) {
+      const text = await direct.text()
+      if (text.length > 500) return text
+    }
   } catch {
     clearTimeout(timeoutId)
   }
 
-  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-  const proxyRes = await fetch(proxyUrl)
-  if (!proxyRes.ok) {
-    throw new Error(`Failed to fetch page (${proxyRes.status})`)
+  const proxyUrls = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ]
+
+  for (const proxyUrl of proxyUrls) {
+    try {
+      const proxyRes = await fetch(proxyUrl)
+      if (!proxyRes.ok) continue
+      const text = await proxyRes.text()
+      if (text.length > 500 && !/^Oops/i.test(text.trim())) return text
+    } catch {
+      /* try next proxy */
+    }
   }
-  return proxyRes.text()
+
+  throw new Error("Failed to fetch page")
 }
 
 function formatDurationSeconds(seconds: number): string {
@@ -913,48 +927,125 @@ function extractLocationFromText(text: string): PinCampLocation | null {
   return null
 }
 
-function parseCampgroundJsonLd(data: unknown): PinCampLocation | null {
+function locationFromCampgroundObject(
+  obj: Record<string, unknown>
+): PinCampLocation | null {
+  const addr = obj.address as Record<string, string> | undefined
+  const lat = obj.latitude != null ? parseFloat(String(obj.latitude)) : null
+  const lng = obj.longitude != null ? parseFloat(String(obj.longitude)) : null
+  const town = addr?.addressLocality?.trim() || null
+  const region = addr?.addressRegion?.trim() || null
+  const country = addr?.addressCountry?.trim() || null
+  if (
+    town ||
+    region ||
+    country ||
+    (lat != null && lng != null && !isNaN(lat) && !isNaN(lng))
+  ) {
+    return {
+      town,
+      region,
+      country,
+      lat: lat != null && !isNaN(lat) ? lat : null,
+      lng: lng != null && !isNaN(lng) ? lng : null,
+    }
+  }
+  return null
+}
+
+const NEAREST_TOWN_PATTERNS = [
+  /ville la plus proche est\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]+?)(?:\s*\(|\.|,|$)/i,
+  /nearest (?:town|city) is\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]+?)(?:\s*\(|\.|,|$)/i,
+  /nächste(?:r|s)?\s+(?:Stadt|Ort)\s+ist\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]+?)(?:\s*\(|\.|,|$)/i,
+  /nächste(?:r|s)?\s+(?:Stadt|Ort):\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]+?)(?:\s*\(|\.|,|$)/i,
+]
+
+function parseNearestTownFromText(text: string): string | null {
+  for (const pattern of NEAREST_TOWN_PATTERNS) {
+    const match = text.match(pattern)
+    const town = match?.[1]?.trim()
+    if (town && town.length > 2) return town
+  }
+  return null
+}
+
+function parseNearestTownFromJsonLd(data: unknown): string | null {
   if (!data || typeof data !== "object") return null
 
   const obj = data as Record<string, unknown>
   const type = obj["@type"]
-  const isCampground =
-    type === "Campground" ||
-    (Array.isArray(type) && type.includes("Campground"))
+  const isFaq =
+    type === "FAQPage" || (Array.isArray(type) && type.includes("FAQPage"))
 
-  if (isCampground) {
-    const addr = obj.address as Record<string, string> | undefined
-    const lat = obj.latitude != null ? parseFloat(String(obj.latitude)) : null
-    const lng = obj.longitude != null ? parseFloat(String(obj.longitude)) : null
-    const town = addr?.addressLocality?.trim() || null
-    const region = addr?.addressRegion?.trim() || null
-    const country = addr?.addressCountry?.trim() || null
-    if (town || region || country || (lat != null && lng != null && !isNaN(lat) && !isNaN(lng))) {
-      return {
-        town,
-        region,
-        country,
-        lat: lat != null && !isNaN(lat) ? lat : null,
-        lng: lng != null && !isNaN(lng) ? lng : null,
-      }
+  if (isFaq) {
+    const entities = obj.mainEntity
+    const list = Array.isArray(entities) ? entities : entities ? [entities] : []
+    for (const entity of list) {
+      if (!entity || typeof entity !== "object") continue
+      const answer = (entity as Record<string, unknown>).acceptedAnswer as
+        | Record<string, unknown>
+        | undefined
+      const text =
+        typeof answer?.text === "string"
+          ? answer.text
+          : typeof (entity as Record<string, unknown>).name === "string"
+            ? String((entity as Record<string, unknown>).name)
+            : ""
+      const town = parseNearestTownFromText(text)
+      if (town) return town
     }
   }
 
   if (Array.isArray(data)) {
     for (const item of data) {
-      const found = parseCampgroundJsonLd(item)
+      const found = parseNearestTownFromJsonLd(item)
       if (found) return found
     }
   }
 
   if (Array.isArray(obj["@graph"])) {
     for (const item of obj["@graph"]) {
-      const found = parseCampgroundJsonLd(item)
+      const found = parseNearestTownFromJsonLd(item)
       if (found) return found
     }
   }
 
   return null
+}
+
+function findBestCampgroundLocation(data: unknown): PinCampLocation | null {
+  let best: PinCampLocation | null = null
+
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== "object") return
+
+    const obj = node as Record<string, unknown>
+    const type = obj["@type"]
+    const isCampground =
+      type === "Campground" ||
+      (Array.isArray(type) && type.includes("Campground"))
+
+    if (isCampground) {
+      const loc = locationFromCampgroundObject(obj)
+      if (loc?.town) {
+        best = loc
+        return
+      }
+      if (loc && !best) best = loc
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item)
+      return
+    }
+
+    if (Array.isArray(obj["@graph"])) {
+      for (const item of obj["@graph"]) visit(item)
+    }
+  }
+
+  visit(data)
+  return best
 }
 
 function extractPinCampLocationFromHtml(
@@ -963,46 +1054,44 @@ function extractPinCampLocationFromHtml(
 ): PinCampLocation | null {
   let location: PinCampLocation | null = null
   let breadcrumbCountry: string | null = null
+  let nearestTown: string | null = null
 
   for (const match of html.matchAll(
     /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
   )) {
     try {
       const parsed = JSON.parse(match[1])
-      if (!location) location = parseCampgroundJsonLd(parsed)
+      const campground = findBestCampgroundLocation(parsed)
+      if (campground?.town) {
+        location = campground
+      } else if (campground && !location) {
+        location = campground
+      }
       if (!breadcrumbCountry) breadcrumbCountry = parseBreadcrumbCountry(parsed)
+      if (!nearestTown) nearestTown = parseNearestTownFromJsonLd(parsed)
     } catch {
       /* ignore malformed JSON-LD */
     }
+  }
+
+  if (location && !location.town && nearestTown) {
+    location = { ...location, town: nearestTown }
   }
 
   if (location && !location.country && breadcrumbCountry) {
     location = { ...location, country: breadcrumbCountry }
   }
 
-  if (location) return location
+  if (location?.town) return location
 
   const latMatch = html.match(/Latitude[^\(]*\(([+-]?\d+\.?\d*)\)/i)
   const lngMatch = html.match(/Longitude[^\(]*\(([+-]?\d+\.?\d*)\)/i)
   const lat = latMatch?.[1] ? parseFloat(latMatch[1]) : null
   const lng = lngMatch?.[1] ? parseFloat(lngMatch[1]) : null
 
-  const postalInHtml = html.match(
-    />\s*(\d{4,5})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]+)\s*<\/?/
-  )
-  if (postalInHtml?.[2]) {
-    return {
-      town: postalInHtml[2].trim(),
-      region: null,
-      country: breadcrumbCountry,
-      lat: lat != null && !isNaN(lat) ? lat : null,
-      lng: lng != null && !isNaN(lng) ? lng : null,
-    }
-  }
-
   if (infoParagraph) {
     const fromText = extractLocationFromText(infoParagraph)
-    if (fromText) {
+    if (fromText?.town) {
       return {
         ...fromText,
         country: fromText.country ?? breadcrumbCountry,
@@ -1012,12 +1101,24 @@ function extractPinCampLocationFromHtml(
     }
   }
 
-  if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-    return { town: null, region: null, country: breadcrumbCountry, lat, lng }
+  if (nearestTown) {
+    return {
+      town: nearestTown,
+      region: location?.region ?? null,
+      country: location?.country ?? breadcrumbCountry,
+      lat:
+        location?.lat ??
+        (lat != null && !isNaN(lat) ? lat : null),
+      lng:
+        location?.lng ??
+        (lng != null && !isNaN(lng) ? lng : null),
+    }
   }
 
-  if (breadcrumbCountry) {
-    return { town: null, region: null, country: breadcrumbCountry, lat: null, lng: null }
+  if (location) return location
+
+  if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+    return { town: null, region: null, country: breadcrumbCountry, lat, lng }
   }
 
   return null
@@ -1157,11 +1258,57 @@ function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
   return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
 }
 
+function normalizePinCampUrl(url: string): string {
+  try {
+    const parsed = new URL(url.trim())
+    return `${parsed.hostname}${parsed.pathname}`.toLowerCase().replace(/\/$/, "")
+  } catch {
+    return url.trim().toLowerCase()
+  }
+}
+
+function pinCampUrlCacheKey(url: string): string {
+  return `url:${normalizePinCampUrl(url)}`
+}
+
+function readGalleryLocationCache(pinUrl: string): PinCampLocation | null {
+  try {
+    const saved = localStorage.getItem(
+      `campground_gallery_${encodeURIComponent(pinUrl.trim())}`
+    )
+    if (!saved) return null
+    const parsed = JSON.parse(saved)
+    const location = parsed?.location as PinCampLocation | undefined
+    return location?.town ? location : null
+  } catch {
+    return null
+  }
+}
+
+function getPinCampLocationForCamp(
+  camp: NormalizedCampsite,
+  pinCampLocations: Record<string, PinCampLocation>
+): PinCampLocation | null {
+  const fromCampId = pinCampLocations[camp.id]
+  if (fromCampId?.town) return fromCampId
+
+  const pinUrl = getCampPinCampUrl(camp)
+  if (!pinUrl) return fromCampId ?? null
+
+  const fromUrl = pinCampLocations[pinCampUrlCacheKey(pinUrl)]
+  if (fromUrl?.town) return fromUrl
+
+  const fromGallery = readGalleryLocationCache(pinUrl)
+  if (fromGallery?.town) return fromGallery
+
+  return fromUrl ?? fromCampId ?? null
+}
+
 function getMeteoblueCountrySlug(
   camp: NormalizedCampsite,
   pinCampLocations: Record<string, PinCampLocation>
 ): string | null {
-  const fromPinCamp = pinCampLocations[camp.id]
+  const fromPinCamp = getPinCampLocationForCamp(camp, pinCampLocations)
   if (fromPinCamp?.country) {
     const slug = countryToMeteoblueSlug(fromPinCamp.country)
     if (slug) return slug
@@ -1192,25 +1339,6 @@ function getCampMapLink(camp: NormalizedCampsite): string {
     )
   })
   return mapKey && camp.raw[mapKey]?.trim() ? camp.raw[mapKey].trim() : ""
-}
-
-function getCampTown(camp: NormalizedCampsite): string {
-  if (camp.town?.trim()) return camp.town.trim()
-  const townKey = Object.keys(camp.raw).find((k) => {
-    const l = k.toLowerCase().replace(/[^a-z0-9]/g, "")
-    return [
-      "town",
-      "city",
-      "ort",
-      "stadt",
-      "place",
-      "locality",
-      "gemeinde",
-      "location",
-    ].some((kw) => l.includes(kw))
-  })
-  if (townKey && camp.raw[townKey]?.trim()) return camp.raw[townKey].trim()
-  return camp.state && camp.state !== "N/A" ? camp.state.trim() : ""
 }
 
 function isPinCampUrl(urlStr: string): boolean {
@@ -1245,31 +1373,21 @@ function getCampPinCampUrl(camp: NormalizedCampsite): string {
   return url && isPinCampUrl(url) ? url : ""
 }
 
-function getMeteobluePlaceName(
-  camp: NormalizedCampsite,
-  pinCampLocations: Record<string, PinCampLocation>
-): string {
-  const fromPinCamp = pinCampLocations[camp.id]
-  if (fromPinCamp?.town) return fromPinCamp.town
-  if (fromPinCamp?.region) return fromPinCamp.region
-
-  const sheetTown = getCampTown(camp)
-  if (sheetTown) return sheetTown
-
-  return camp.state && camp.state !== "N/A" ? camp.state.trim() : ""
-}
-
 function buildMeteoblueUrlForCamp(
   camp: NormalizedCampsite,
   pinCampLocations: Record<string, PinCampLocation>
 ): string | null {
-  const place = getMeteobluePlaceName(camp, pinCampLocations)
+  const fromPinCamp = getPinCampLocationForCamp(camp, pinCampLocations)
+  const place = fromPinCamp?.town?.trim() ?? ""
   const countrySlug = getMeteoblueCountrySlug(camp, pinCampLocations)
   if (place) return buildMeteoblueUrl(place, countrySlug)
 
-  const fromPinCamp = pinCampLocations[camp.id]
   if (fromPinCamp?.lat != null && fromPinCamp?.lng != null) {
     return buildMeteoblueUrlFromCoords(fromPinCamp.lat, fromPinCamp.lng)
+  }
+
+  if (camp.latitude != null && camp.longitude != null) {
+    return buildMeteoblueUrlFromCoords(camp.latitude, camp.longitude)
   }
 
   return null
@@ -2080,24 +2198,45 @@ export default function App() {
   // Keep track of resolved coordinate attempts to prevent infinite request loops
   const attemptedResolves = useRef<Set<string>>(new Set())
   const attemptedPinCampLocations = useRef<Set<string>>(new Set())
+  const pinCampLocationCacheRef = useRef<Record<string, PinCampLocation>>({})
 
   const [pinCampLocationCache, setPinCampLocationCache] = useState<
     Record<string, PinCampLocation>
   >(() => {
     try {
-      const saved = localStorage.getItem("campground_pincamp_locations_v2")
-      return saved ? JSON.parse(saved) : {}
+      const saved = localStorage.getItem("campground_pincamp_locations_v3")
+      if (saved) return JSON.parse(saved)
+
+      const legacy = localStorage.getItem("campground_pincamp_locations_v2")
+      if (!legacy) return {}
+
+      const parsed = JSON.parse(legacy) as Record<string, PinCampLocation>
+      const migrated: Record<string, PinCampLocation> = {}
+      for (const [key, value] of Object.entries(parsed)) {
+        if (value?.town) migrated[key] = value
+      }
+      return migrated
     } catch {
       return {}
     }
   })
 
-  // Fetch town/region from Pin Camp pages for MeteoBlue links
+  pinCampLocationCacheRef.current = pinCampLocationCache
+
+  // Fetch town from each Pin Camp page for MeteoBlue links
   useEffect(() => {
     const needsLocation = campsites.filter((c) => {
       const pinUrl = getCampPinCampUrl(c)
-      if (!pinUrl || pinCampLocationCache[c.id]?.country) return false
-      return !attemptedPinCampLocations.current.has(c.id)
+      if (!pinUrl) return false
+      if (
+        getPinCampLocationForCamp(c, pinCampLocationCacheRef.current)?.town
+      ) {
+        return false
+      }
+      if (attemptedPinCampLocations.current.has(normalizePinCampUrl(pinUrl))) {
+        return false
+      }
+      return true
     })
     if (needsLocation.length === 0) return
 
@@ -2108,12 +2247,18 @@ export default function App() {
 
       for (const camp of needsLocation) {
         if (!active) break
-        attemptedPinCampLocations.current.add(camp.id)
         const pinUrl = getCampPinCampUrl(camp)
+        if (!pinUrl) continue
+
+        const urlKey = normalizePinCampUrl(pinUrl)
+        attemptedPinCampLocations.current.add(urlKey)
 
         try {
           const data = await scrapePageImages(pinUrl)
-          if (data.location) updates[camp.id] = data.location
+          if (data.location?.town) {
+            updates[camp.id] = data.location
+            updates[pinCampUrlCacheKey(pinUrl)] = data.location
+          }
         } catch (err) {
           console.warn(
             `[Pin Camp Location] Could not resolve location for ${camp.name}:`,
@@ -2128,9 +2273,10 @@ export default function App() {
         setPinCampLocationCache((prev) => {
           const next = { ...prev, ...updates }
           localStorage.setItem(
-            "campground_pincamp_locations_v2",
+            "campground_pincamp_locations_v3",
             JSON.stringify(next)
           )
+          localStorage.removeItem("campground_pincamp_locations_v2")
           return next
         })
       }
@@ -2773,11 +2919,15 @@ export default function App() {
                           camp,
                           pinCampLocationCache
                         )
+                        const pinCampUrl = getCampPinCampUrl(camp)
                         const meteoPending =
                           !meteoblueUrl &&
-                          !!getCampPinCampUrl(camp) &&
-                          !pinCampLocationCache[camp.id] &&
-                          !attemptedPinCampLocations.current.has(camp.id)
+                          !!pinCampUrl &&
+                          !getPinCampLocationForCamp(camp, pinCampLocationCache)
+                            ?.town &&
+                          !attemptedPinCampLocations.current.has(
+                            normalizePinCampUrl(pinCampUrl)
+                          )
 
                         return (
                           <>
