@@ -8,7 +8,8 @@ import {
   X, 
   Compass, 
   Heart, 
-  CloudOff, 
+  CloudOff,
+  CloudSun, 
   FileSpreadsheet, 
   Layers, 
   Navigation, 
@@ -35,6 +36,7 @@ export interface NormalizedCampsite {
   id: string;
   name: string;
   state: string;
+  town: string;
   price: string;
   numericPrice: number;
   rating: string;
@@ -709,6 +711,21 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
   return { imageUrl: resolvedHeroUrl, images: finalImagesList.slice(0, 12), infoParagraph };
 }
 
+function buildMeteoblueUrl(town: string): string {
+  const slug = town.trim().replace(/\s+/g, '_');
+  return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(slug)}`;
+}
+
+function getCampTown(camp: NormalizedCampsite): string {
+  if (camp.town?.trim()) return camp.town.trim();
+  const townKey = Object.keys(camp.raw).find(k => {
+    const l = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return ['town', 'city', 'ort', 'stadt', 'place', 'locality', 'gemeinde'].some(kw => l.includes(kw));
+  });
+  if (townKey && camp.raw[townKey]?.trim()) return camp.raw[townKey].trim();
+  return camp.state && camp.state !== 'N/A' ? camp.state.trim() : '';
+}
+
 // Normalized fuzzy column extractor
 function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsite {
   const findValue = (keywords: string[]): string => {
@@ -720,7 +737,8 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
   };
 
   const name = findValue(['name', 'campsite', 'title', 'campground']) || 'Unnamed Campsite';
-  const state = findValue(['state', 'region', 'location', 'province', 'area']) || 'N/A';
+  const state = findValue(['state', 'region', 'province', 'area']) || 'N/A';
+  const town = findValue(['town', 'city', 'ort', 'stadt', 'place', 'locality', 'gemeinde', 'location']) || '';
   const priceStr = findValue(['price', 'cost', 'rate', 'fee']) || '';
   const priceClean = priceStr.replace(/[^0-9.]/g, '');
   const numericPrice = priceClean ? parseFloat(priceClean) : 0;
@@ -796,6 +814,7 @@ function normalizeRow(row: Record<string, string>, id: string): NormalizedCampsi
     id,
     name,
     state,
+    town,
     price: priceStr || 'Gratis',
     numericPrice,
     rating: ratingStr || 'Keine Angabe',
@@ -1846,10 +1865,12 @@ export default function App() {
                           return l === 'url' || l === 'website' || l === 'webseite' || l === 'link' || l.includes('site_link') || l === 'websitelink';
                         }) || 'URL';
                         const urlVal = camp.raw[urlKey];
+                        const townVal = getCampTown(camp);
+                        const meteoblueUrl = townVal ? buildMeteoblueUrl(townVal) : null;
 
                         return (
                           <>
-                            <div className="grid grid-cols-2 gap-2 sm:gap-4">
+                            <div className="grid grid-cols-3 gap-2 sm:gap-4">
                               {/* Map (Karte) Block */}
                               {mapVal ? (
                                 <a
@@ -1866,6 +1887,25 @@ export default function App() {
                               ) : (
                                 <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
                                   <span className="text-xs sm:text-sm text-editorial-muted italic">Keine Karte hinterlegt</span>
+                                </div>
+                              )}
+
+                              {/* MeteoBlue Block */}
+                              {meteoblueUrl ? (
+                                <a
+                                  href={meteoblueUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans block hover:bg-[#EAE8E0] transition-colors min-w-0"
+                                >
+                                  <span className="text-xs sm:text-sm text-editorial-moss font-semibold flex items-center gap-1.5">
+                                    <CloudSun className="w-4 h-4 shrink-0" />
+                                    <span>MeteoBlue</span>
+                                  </span>
+                                </a>
+                              ) : (
+                                <div className="bg-[#F2F0EA] p-3 sm:p-4 rounded-xl border border-editorial-border font-sans min-w-0">
+                                  <span className="text-xs sm:text-sm text-editorial-muted italic">Kein Ort hinterlegt</span>
                                 </div>
                               )}
 
