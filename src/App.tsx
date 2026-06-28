@@ -1106,12 +1106,8 @@ function extractPinCampLocationFromHtml(
       town: nearestTown,
       region: location?.region ?? null,
       country: location?.country ?? breadcrumbCountry,
-      lat:
-        location?.lat ??
-        (lat != null && !isNaN(lat) ? lat : null),
-      lng:
-        location?.lng ??
-        (lng != null && !isNaN(lng) ? lng : null),
+      lat: location?.lat ?? (lat != null && !isNaN(lat) ? lat : null),
+      lng: location?.lng ?? (lng != null && !isNaN(lng) ? lng : null),
     }
   }
 
@@ -1249,13 +1245,15 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
 function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
   const slug = place.trim().replace(/\s+/g, "_")
   const fullSlug = countrySlug ? `${slug}_${countrySlug}` : slug
-  return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
+  return `meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
 }
 
 function normalizePinCampUrl(url: string): string {
   try {
     const parsed = new URL(url.trim())
-    return `${parsed.hostname}${parsed.pathname}`.toLowerCase().replace(/\/$/, "")
+    return `${parsed.hostname}${parsed.pathname}`
+      .toLowerCase()
+      .replace(/\/$/, "")
   } catch {
     return url.trim().toLowerCase()
   }
@@ -1751,10 +1749,7 @@ function CampgroundDetailImages({
                 location: data.location,
               })
             )
-            if (
-              data.location &&
-              (data.location.town || data.location.region)
-            ) {
+            if (data.location && (data.location.town || data.location.region)) {
               onLocationFound?.(data.location)
             }
           } else {
@@ -2240,9 +2235,7 @@ export default function App() {
     const needsLocation = campsites.filter((c) => {
       const pinUrl = getCampPinCampUrl(c)
       if (!pinUrl) return false
-      if (
-        hasPinCampMeteoPlace(c, pinCampLocationCacheRef.current)
-      ) {
+      if (hasPinCampMeteoPlace(c, pinCampLocationCacheRef.current)) {
         return false
       }
       if (attemptedPinCampLocations.current.has(normalizePinCampUrl(pinUrl))) {
