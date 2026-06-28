@@ -1245,7 +1245,7 @@ async function scrapePageImages(pageUrl: string): Promise<ScrapeResult> {
 function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
   const slug = place.trim().replace(/\s+/g, "_")
   const fullSlug = countrySlug ? `${slug}_${countrySlug}` : slug
-  return `meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
+  return `https://meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
 }
 
 function normalizePinCampUrl(url: string): string {
