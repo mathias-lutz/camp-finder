@@ -709,6 +709,7 @@ async function resolveCoordsAsync(
 interface PinCampLocation {
   town: string | null
   region: string | null
+  country: string | null
   lat: number | null
   lng: number | null
 }
@@ -739,13 +740,164 @@ function stripHtmlTags(html: string): string {
   )
 }
 
+const METEOBLUE_COUNTRY_SLUGS: Record<string, string> = {
+  france: "frankreich",
+  frankreich: "frankreich",
+  fr: "frankreich",
+  germany: "deutschland",
+  deutschland: "deutschland",
+  de: "deutschland",
+  switzerland: "schweiz",
+  schweiz: "schweiz",
+  ch: "schweiz",
+  italy: "italien",
+  italien: "italien",
+  it: "italien",
+  spain: "spanien",
+  spanien: "spanien",
+  espana: "spanien",
+  es: "spanien",
+  austria: "oesterreich",
+  oesterreich: "oesterreich",
+  österreich: "oesterreich",
+  at: "oesterreich",
+  netherlands: "niederlande",
+  niederlande: "niederlande",
+  nl: "niederlande",
+  belgium: "belgien",
+  belgien: "belgien",
+  be: "belgien",
+  portugal: "portugal",
+  pt: "portugal",
+  croatia: "kroatien",
+  kroatien: "kroatien",
+  hr: "kroatien",
+  slovenia: "slowenien",
+  slowenien: "slowenien",
+  si: "slowenien",
+  luxembourg: "luxemburg",
+  luxemburg: "luxemburg",
+  lu: "luxemburg",
+  poland: "polen",
+  polen: "polen",
+  pl: "polen",
+  "czech republic": "tschechien",
+  czechia: "tschechien",
+  tschechien: "tschechien",
+  cz: "tschechien",
+  denmark: "daenemark",
+  daenemark: "daenemark",
+  dk: "daenemark",
+  sweden: "schweden",
+  schweden: "schweden",
+  se: "schweden",
+  norway: "norwegen",
+  norwegen: "norwegen",
+  no: "norwegen",
+  "united kingdom": "grossbritannien",
+  "great britain": "grossbritannien",
+  grossbritannien: "grossbritannien",
+  uk: "grossbritannien",
+  gb: "grossbritannien",
+  england: "grossbritannien",
+  ireland: "irland",
+  irland: "irland",
+  ie: "irland",
+  greece: "griechenland",
+  griechenland: "griechenland",
+  gr: "griechenland",
+  hungary: "ungarn",
+  ungarn: "ungarn",
+  hu: "ungarn",
+  romania: "rumaenien",
+  rumaenien: "rumaenien",
+  ro: "rumaenien",
+  slovakia: "slowakei",
+  slowakei: "slowakei",
+  sk: "slowakei",
+}
+
+function countryToMeteoblueSlug(country: string): string | null {
+  const key = country.trim().toLowerCase()
+  if (METEOBLUE_COUNTRY_SLUGS[key]) return METEOBLUE_COUNTRY_SLUGS[key]
+  const ascii = key.normalize("NFD").replace(/\p{M}/gu, "")
+  return METEOBLUE_COUNTRY_SLUGS[ascii] ?? null
+}
+
+function inferCountrySlugFromPinCampUrl(url: string): string | null {
+  try {
+    const host = new URL(url.trim()).hostname.toLowerCase()
+    if (host.endsWith(".pincamp.fr")) return "frankreich"
+    if (host.endsWith(".pincamp.de")) return "deutschland"
+    if (host.endsWith(".pincamp.ch")) return "schweiz"
+    if (host.endsWith(".pincamp.it")) return "italien"
+    if (host.includes("anwbcamping.nl")) return "niederlande"
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function parseBreadcrumbCountry(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null
+  const obj = data as Record<string, unknown>
+  const type = obj["@type"]
+  const isBreadcrumb =
+    type === "BreadcrumbList" ||
+    (Array.isArray(type) && type.includes("BreadcrumbList"))
+
+  if (isBreadcrumb) {
+    const elements = obj.itemListElement ?? obj.itemListelement
+    const list = Array.isArray(elements) ? elements : elements ? [elements] : []
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue
+      const el = item as Record<string, unknown>
+      if (el.position === 1 || el.position === "1") {
+        const nested = el.item as Record<string, unknown> | undefined
+        const name =
+          (typeof nested?.name === "string" ? nested.name : null) ||
+          (typeof el.name === "string" ? el.name : null)
+        if (name) return name
+      }
+    }
+  }
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const found = parseBreadcrumbCountry(item)
+      if (found) return found
+    }
+  }
+
+  if (Array.isArray(obj["@graph"])) {
+    for (const item of obj["@graph"]) {
+      const found = parseBreadcrumbCountry(item)
+      if (found) return found
+    }
+  }
+
+  return null
+}
+
 function extractLocationFromText(text: string): PinCampLocation | null {
+  const countryMatch = text.match(
+    /\b(France|Deutschland|Germany|Switzerland|Schweiz|Italy|Italien|Spain|Spanien|España|Austria|Österreich|Belgium|Belgien|Netherlands|Niederlande|Portugal|Croatia|Kroatien|Slovenia|Slowenien|Luxembourg|Luxemburg|Poland|Polen|Denmark|Dänemark|Sweden|Schweden|Norway|Norwegen|Ireland|Irland|Greece|Griechenland|Hungary|Ungarn|Romania|Rumänien|Slovakia|Slowakei|Czech Republic|Tschechien)\b/i
+  )
+  const country = countryMatch?.[1] ?? null
+
   const postalTown = text.match(
     /\b(\d{4,5})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'’-]{2,})/
   )
   if (postalTown?.[2]) {
-    const town = postalTown[2].trim().replace(/\s+(France|Deutschland|Germany|Switzerland|Schweiz|Italy|Italien|Spain|España)$/i, "")
-    if (town.length > 2) return { town, region: null, lat: null, lng: null }
+    const town = postalTown[2]
+      .trim()
+      .replace(
+        /\s+(France|Deutschland|Germany|Switzerland|Schweiz|Italy|Italien|Spain|España)$/i,
+        ""
+      )
+    if (town.length > 2) {
+      return { town, region: null, country, lat: null, lng: null }
+    }
   }
 
   const regionMatch = text.match(
@@ -754,7 +906,7 @@ function extractLocationFromText(text: string): PinCampLocation | null {
   if (regionMatch?.[1]) {
     const region = regionMatch[1].trim()
     if (region.length > 3 && !/camping|campground|nature/i.test(region)) {
-      return { town: null, region, lat: null, lng: null }
+      return { town: null, region, country, lat: null, lng: null }
     }
   }
 
@@ -776,10 +928,12 @@ function parseCampgroundJsonLd(data: unknown): PinCampLocation | null {
     const lng = obj.longitude != null ? parseFloat(String(obj.longitude)) : null
     const town = addr?.addressLocality?.trim() || null
     const region = addr?.addressRegion?.trim() || null
-    if (town || region || (lat != null && lng != null && !isNaN(lat) && !isNaN(lng))) {
+    const country = addr?.addressCountry?.trim() || null
+    if (town || region || country || (lat != null && lng != null && !isNaN(lat) && !isNaN(lng))) {
       return {
         town,
         region,
+        country,
         lat: lat != null && !isNaN(lat) ? lat : null,
         lng: lng != null && !isNaN(lng) ? lng : null,
       }
@@ -807,16 +961,26 @@ function extractPinCampLocationFromHtml(
   html: string,
   infoParagraph?: string | null
 ): PinCampLocation | null {
+  let location: PinCampLocation | null = null
+  let breadcrumbCountry: string | null = null
+
   for (const match of html.matchAll(
     /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
   )) {
     try {
-      const found = parseCampgroundJsonLd(JSON.parse(match[1]))
-      if (found) return found
+      const parsed = JSON.parse(match[1])
+      if (!location) location = parseCampgroundJsonLd(parsed)
+      if (!breadcrumbCountry) breadcrumbCountry = parseBreadcrumbCountry(parsed)
     } catch {
       /* ignore malformed JSON-LD */
     }
   }
+
+  if (location && !location.country && breadcrumbCountry) {
+    location = { ...location, country: breadcrumbCountry }
+  }
+
+  if (location) return location
 
   const latMatch = html.match(/Latitude[^\(]*\(([+-]?\d+\.?\d*)\)/i)
   const lngMatch = html.match(/Longitude[^\(]*\(([+-]?\d+\.?\d*)\)/i)
@@ -830,6 +994,7 @@ function extractPinCampLocationFromHtml(
     return {
       town: postalInHtml[2].trim(),
       region: null,
+      country: breadcrumbCountry,
       lat: lat != null && !isNaN(lat) ? lat : null,
       lng: lng != null && !isNaN(lng) ? lng : null,
     }
@@ -840,6 +1005,7 @@ function extractPinCampLocationFromHtml(
     if (fromText) {
       return {
         ...fromText,
+        country: fromText.country ?? breadcrumbCountry,
         lat: fromText.lat ?? (lat != null && !isNaN(lat) ? lat : null),
         lng: fromText.lng ?? (lng != null && !isNaN(lng) ? lng : null),
       }
@@ -847,7 +1013,11 @@ function extractPinCampLocationFromHtml(
   }
 
   if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-    return { town: null, region: null, lat, lng }
+    return { town: null, region: null, country: breadcrumbCountry, lat, lng }
+  }
+
+  if (breadcrumbCountry) {
+    return { town: null, region: null, country: breadcrumbCountry, lat: null, lng: null }
   }
 
   return null
@@ -981,9 +1151,29 @@ function buildMeteoblueUrlFromCoords(lat: number, lng: number): string {
   return `https://www.meteoblue.com/de/wetter/woche/${latPart}${lngPart}`
 }
 
-function buildMeteoblueUrl(town: string): string {
-  const slug = town.trim().replace(/\s+/g, "_")
-  return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(slug)}`
+function buildMeteoblueUrl(place: string, countrySlug?: string | null): string {
+  const slug = place.trim().replace(/\s+/g, "_")
+  const fullSlug = countrySlug ? `${slug}_${countrySlug}` : slug
+  return `https://www.meteoblue.com/de/wetter/woche/${encodeURIComponent(fullSlug)}`
+}
+
+function getMeteoblueCountrySlug(
+  camp: NormalizedCampsite,
+  pinCampLocations: Record<string, PinCampLocation>
+): string | null {
+  const fromPinCamp = pinCampLocations[camp.id]
+  if (fromPinCamp?.country) {
+    const slug = countryToMeteoblueSlug(fromPinCamp.country)
+    if (slug) return slug
+  }
+
+  const pinUrl = getCampPinCampUrl(camp)
+  if (pinUrl) {
+    const fromUrl = inferCountrySlugFromPinCampUrl(pinUrl)
+    if (fromUrl) return fromUrl
+  }
+
+  return null
 }
 
 function getCampMapLink(camp: NormalizedCampsite): string {
@@ -1074,7 +1264,8 @@ function buildMeteoblueUrlForCamp(
   pinCampLocations: Record<string, PinCampLocation>
 ): string | null {
   const place = getMeteobluePlaceName(camp, pinCampLocations)
-  if (place) return buildMeteoblueUrl(place)
+  const countrySlug = getMeteoblueCountrySlug(camp, pinCampLocations)
+  if (place) return buildMeteoblueUrl(place, countrySlug)
 
   const fromPinCamp = pinCampLocations[camp.id]
   if (fromPinCamp?.lat != null && fromPinCamp?.lng != null) {
@@ -1894,7 +2085,7 @@ export default function App() {
     Record<string, PinCampLocation>
   >(() => {
     try {
-      const saved = localStorage.getItem("campground_pincamp_locations")
+      const saved = localStorage.getItem("campground_pincamp_locations_v2")
       return saved ? JSON.parse(saved) : {}
     } catch {
       return {}
@@ -1905,7 +2096,7 @@ export default function App() {
   useEffect(() => {
     const needsLocation = campsites.filter((c) => {
       const pinUrl = getCampPinCampUrl(c)
-      if (!pinUrl || pinCampLocationCache[c.id]) return false
+      if (!pinUrl || pinCampLocationCache[c.id]?.country) return false
       return !attemptedPinCampLocations.current.has(c.id)
     })
     if (needsLocation.length === 0) return
@@ -1937,7 +2128,7 @@ export default function App() {
         setPinCampLocationCache((prev) => {
           const next = { ...prev, ...updates }
           localStorage.setItem(
-            "campground_pincamp_locations",
+            "campground_pincamp_locations_v2",
             JSON.stringify(next)
           )
           return next
