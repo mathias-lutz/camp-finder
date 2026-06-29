@@ -1986,6 +1986,35 @@ function CampgroundDetailImages({
     })
   }, [images])
 
+  // Prevent camp list scrolling while lightbox is open
+  useEffect(() => {
+    if (lightboxIdx === null) return
+
+    const scrollEl =
+      document.getElementById("camp-list-scroll") ??
+      document.querySelector("main")
+    const scrollTop = scrollEl?.scrollTop ?? 0
+
+    const prevBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+
+    const prevScrollOverflow = scrollEl?.style.overflow ?? ""
+    const prevScrollTouchAction = scrollEl?.style.touchAction ?? ""
+    if (scrollEl) {
+      scrollEl.style.overflow = "hidden"
+      scrollEl.style.touchAction = "none"
+    }
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow
+      if (scrollEl) {
+        scrollEl.style.overflow = prevScrollOverflow
+        scrollEl.style.touchAction = prevScrollTouchAction
+        scrollEl.scrollTop = scrollTop
+      }
+    }
+  }, [lightboxIdx])
+
   // Handle keyboard navigation for the lightbox
   useEffect(() => {
     if (lightboxIdx === null || uniqueImages.length === 0) return
@@ -2085,7 +2114,7 @@ function CampgroundDetailImages({
           {/* LIGHTBOX OVERLAY */}
           {lightboxIdx !== null && (
             <div
-              className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4 select-none"
+              className="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center p-4 select-none overscroll-none touch-none"
               onClick={() => setLightboxIdx(null)}
             >
               {/* Close button */}
@@ -2945,6 +2974,7 @@ export default function App() {
 
       {/* MAIN CONTAINER (Single Column Layout) */}
       <main
+        id="camp-list-scroll"
         className={`flex-1 ${CONTENT_MAX_W} w-full mx-auto p-4 md:p-6 flex flex-col gap-6 ${showMapOverview ? "overflow-hidden" : "overflow-y-auto"}`}
       >
         {/* TOTAL AND SORT SELECTOR BAR */}
